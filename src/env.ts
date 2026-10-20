@@ -7,6 +7,13 @@ const schema = z.object({
 	// GitHub App OAuth (Settings → Developer settings → GitHub Apps → Client ID / secret).
 	GITHUB_CLIENT_ID: z.string().min(1),
 	GITHUB_CLIENT_SECRET: z.string().min(1),
+	// GitHub App → App ID, public link slug (github.com/apps/<slug>) and private key (.pem; \n escaped is fine).
+	GITHUB_APP_ID: z.string().min(1),
+	GITHUB_APP_SLUG: z.string().min(1),
+	GITHUB_APP_PRIVATE_KEY: z
+		.string()
+		.min(1)
+		.transform((s) => s.replace(/\\n/g, '\n')),
 	// Comma-separated GitHub logins allowed to sign in.
 	ALLOWED_GITHUB_LOGINS: z.string().transform((s) =>
 		s

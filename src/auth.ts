@@ -66,9 +66,8 @@ auth.get('/auth/github/callback', async (c) => {
 	const { access_token } = (await tokenRes.json()) as { access_token?: string };
 	if (!access_token) return fail('github_error');
 
-	const userRes = await fetch('https://api.github.com/user', {
-		headers: { Authorization: `Bearer ${access_token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'stocko' },
-	});
+	const headers = { Authorization: `Bearer ${access_token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'stocko' };
+	const userRes = await fetch('https://api.github.com/user', { headers });
 	if (!userRes.ok) return fail('github_error');
 	const gh = (await userRes.json()) as { id: number; login: string; name: string | null; avatar_url: string };
 
@@ -91,6 +90,19 @@ auth.get('/auth/github/callback', async (c) => {
 				})
 			).id;
 
+	// Links every App installation this GitHub user can access. The installation_id GitHub appends to the
+	// setup URL is spoofable, so the user's own token is the source of truth. Ones owned by another workspace are skipped.
+	// ponytail: first 100 installations only; paginate if a user ever has more.
+	const instRes = await fetch('https://api.github.com/user/installations?per_page=100', { headers });
+	if (instRes.ok) {
+		const { installations } = (await instRes.json()) as { installations: { id: number; account: { login: string } }[] };
+		const { workspaceId } = await db.member.findFirstOrThrow({ where: { userId } });
+		await db.installation.createMany({
+			data: installations.map((i) => ({ workspaceId, githubInstallationId: BigInt(i.id), accountLogin: i.account.login })),
+			skipDuplicates: true,
+		});
+	}
+
 	const token = randomToken();
 	await db.session.create({
 		data: { tokenHash: sha256(token), userId, expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
@@ -98,6 +110,10 @@ auth.get('/auth/github/callback', async (c) => {
 	// Fragment never reaches servers or logs.
 	return c.redirect(`${env.FRONTEND_URL}/login#token=${token}`);
 });
+
+// GitHub install page (pick account + repos). The App's Setup URL points back to /auth/github/login,
+// which re-runs OAuth and links the installation above.
+auth.get('/github/install', (c) => c.redirect(`https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`));
 
 auth.post('/auth/logout', requireAuth, async (c) => {
 	await db.session.delete({ where: { tokenHash: c.var.tokenHash } });

@@ -3,6 +3,9 @@ import { expect, test } from 'bun:test';
 process.env.GITHUB_CLIENT_ID ||= 'test';
 process.env.GITHUB_CLIENT_SECRET ||= 'test';
 process.env.ALLOWED_GITHUB_LOGINS ??= '';
+process.env.GITHUB_APP_ID ||= 'test';
+process.env.GITHUB_APP_SLUG ||= 'test';
+process.env.GITHUB_APP_PRIVATE_KEY ||= 'test';
 
 const { auth, sha256 } = await import('./auth');
 const { db } = await import('./db');

@@ -91,7 +91,7 @@ Contexto:
 - Token opaco (32 bytes) entregue em `app/login#token=` (fragment), armazenado no localStorage do front, enviado como `Authorization: Bearer`. Banco guarda só `sha256`. TTL 7 dias deslizante.
 - Allowlist `ALLOWED_GITHUB_LOGINS`.
 - `requireAuth` único; futuro: ramo para JWT do host (Module Federation).
-- Instalação do App: `installation_id` validado contra `GET /user/installations` do usuário antes de vincular.
+- Instalação do App: cada login vincula ao workspace as instalações de `GET /user/installations` (token do usuário); `installation_id` da URL é ignorado.
 - Toda query filtrada por `workspaceId` (anti-IDOR).
 - Webhook com HMAC (`X-Hub-Signature-256`) sobre o raw body.
 - Front: markdown do agente renderizado **sem HTML bruto** (prompt injection via código → XSS → roubo de token).
@@ -107,8 +107,7 @@ GET    /auth/github/callback
 POST   /auth/logout
 GET    /me
 
-GET    /github/install
-GET    /github/install/callback
+GET    /github/install                — redireciona p/ instalar o App; Setup URL volta em /auth/github/login
 GET    /github/repos
 POST   /webhooks/github
 
