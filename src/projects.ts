@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { assertPublicUrl, parseSpec, seal } from './apis';
 import { requireAuth, type AuthVars } from './auth';
 import { installationOctokit } from './client';
 import { db } from './db';
+import type { Prisma } from './generated/prisma/client';
 import { syncRepo } from './repos';
 
 /** Repos the App can reach across the workspace's installations, most recently pushed first. */
@@ -93,6 +95,60 @@ projects.post('/projects', requireAuth, async (c) => {
 	// Clone in the background so the first question finds the code ready.
 	for (const r of rows) void syncRepo(r.id);
 	return c.json({ id: project.id }, 201);
+});
+
+const apiSummary = { id: true, title: true, description: true, usage: true, baseUrl: true, createdAt: true } as const;
+
+projects.get('/projects/:id/apis', requireAuth, async (c) => {
+	const list = await db.apiSpec.findMany({
+		where: { projectId: c.req.param('id'), project: { workspaceId: c.var.workspaceId } },
+		orderBy: { createdAt: 'asc' },
+		select: { ...apiSummary, authHeader: true },
+	});
+	// Never send the secret back, only whether there is one.
+	return c.json(list.map(({ authHeader, ...a }) => ({ ...a, hasAuth: !!authHeader })));
+});
+
+const createApi = z.object({
+	title: z.string().trim().min(1).max(100),
+	description: z.string().trim().min(1).max(2000),
+	usage: z.string().trim().max(4000).default(''),
+	baseUrl: z.url().optional(),
+	authHeader: z
+		.string()
+		.trim()
+		.regex(/^[\w-]+:\s*\S.*$/, 'formato "Header: valor"')
+		.optional(),
+	spec: z.string().min(1).max(10 * 1024 * 1024),
+});
+
+projects.post('/projects/:id/apis', requireAuth, async (c) => {
+	const body = createApi.safeParse(await c.req.json().catch(() => null));
+	if (!body.success) return c.json({ error: 'invalid_body', issues: body.error.issues }, 400);
+	const project = await db.project.findFirst({ where: { id: c.req.param('id'), workspaceId: c.var.workspaceId } });
+	if (!project) return c.json({ error: 'not_found' }, 404);
+
+	const { spec, authHeader, baseUrl, ...meta } = body.data;
+	try {
+		const data = {
+			...meta,
+			projectId: project.id,
+			spec: parseSpec(spec) as Prisma.InputJsonValue,
+			baseUrl: baseUrl ? (await assertPublicUrl(baseUrl)).href : null,
+			authHeader: authHeader ? seal(authHeader) : null,
+		};
+		const api = await db.apiSpec.create({ data, select: apiSummary });
+		return c.json(api, 201);
+	} catch (e) {
+		return c.json({ error: 'invalid_api', message: (e as Error).message }, 400);
+	}
+});
+
+projects.delete('/projects/:id/apis/:aid', requireAuth, async (c) => {
+	const { count } = await db.apiSpec.deleteMany({
+		where: { id: c.req.param('aid'), projectId: c.req.param('id'), project: { workspaceId: c.var.workspaceId } },
+	});
+	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
 });
 
 projects.delete('/projects/:id', requireAuth, async (c) => {

@@ -138,9 +138,30 @@ model Project {
   createdAt     DateTime        @default(now())
   workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   sources       ProjectSource[]
+  apis          ApiSpec[]
   conversations Conversation[]
 
   @@index([workspaceId])
+}
+
+/// OpenAPI/Swagger spec the agent can search and, with baseUrl, call (GET only).
+model ApiSpec {
+  id          String   @id @default(cuid())
+  projectId   String
+  title       String
+  /// What the API is (e.g. "Prometheus do cluster de produção").
+  description String
+  /// When/how the agent should use it (e.g. "lentidão: histogram_quantile em http_request_duration_seconds").
+  usage       String
+  /// Null = documentation only.
+  baseUrl     String?
+  /// "Header-Name: value", AES-GCM sealed (apis.ts). Never returned by the API.
+  authHeader  String?
+  spec        Json
+  createdAt   DateTime @default(now())
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
 }
 
 enum SourceType {

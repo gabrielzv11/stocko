@@ -22,6 +22,11 @@ const schema = z.object({
 	// Shallow clones the agent searches. Railway: volume mounted at /data/repos.
 	REPOS_DIR: z.string().default('./data/repos'),
 	MAX_REPO_SIZE_MB: z.coerce.number().default(500),
+	// 32 random bytes in base64 (`openssl rand -base64 32`). Encrypts API auth headers; only needed to save one.
+	SECRETS_KEY: z
+		.string()
+		.refine((s) => Buffer.from(s, 'base64').length === 32, 'expected 32 bytes in base64')
+		.optional(),
 	// Comma-separated GitHub logins allowed to sign in.
 	ALLOWED_GITHUB_LOGINS: z.string().transform((s) =>
 		s
