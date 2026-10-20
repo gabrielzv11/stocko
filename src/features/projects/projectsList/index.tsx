@@ -7,14 +7,17 @@ import { githubInstallUrl } from '@/lib/auth';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useProjects, useRepos } from '../api';
+import { ProjectApis } from '../projectApis';
 
 interface Props extends React.HTMLAttributes<HTMLDivElement> {}
 
 function ProjectsList({ ...props }: Props) {
 	const [creating, setCreating] = useState(false);
+	const [selectedId, setSelectedId] = useState<string>();
 	const queryClient = useQueryClient();
 	const { data: projects = [], isPending } = useProjects();
 	const { data: repos = [], isPending: reposPending } = useRepos();
+	const selected = projects.find((p) => p.id === selectedId);
 	const invalidate = () => queryClient.invalidateQueries({ queryKey: ['projects'] });
 
 	const create = useMutation({
@@ -37,9 +40,7 @@ function ProjectsList({ ...props }: Props) {
 	return (
 		<div {...props}>
 			<div className='flex items-center justify-between gap-2 px-12 py-4'>
-				<p className='text-sm text-muted-foreground'>
-					{isPending ? 'Carregando projetos...' : `${projects.length} projeto(s)`}
-				</p>
+				<p className='text-muted-foreground text-sm'>{isPending ? 'Carregando projetos...' : `${projects.length} projeto(s)`}</p>
 				{!creating && (
 					<Button size='sm' onClick={() => setCreating(true)}>
 						Novo projeto
@@ -51,19 +52,17 @@ function ProjectsList({ ...props }: Props) {
 				<form onSubmit={handleSubmit} className='flex flex-col gap-3 px-12 pb-4'>
 					<TextField name='name' placeholder='Nome do projeto' required autoFocus />
 
-					<fieldset className='flex flex-col gap-1.5 rounded-lg border border-border p-3'>
-						<legend className='px-1 text-sm text-muted-foreground'>Repositórios</legend>
-						{reposPending && <p className='text-sm text-muted-foreground'>Carregando repositórios...</p>}
-						{!reposPending && !repos.length && (
-							<p className='text-sm text-muted-foreground'>Nenhum repositório liberado para o App.</p>
-						)}
+					<fieldset className='border-border flex flex-col gap-1.5 rounded-lg border p-3'>
+						<legend className='text-muted-foreground px-1 text-sm'>Repositórios</legend>
+						{reposPending && <p className='text-muted-foreground text-sm'>Carregando repositórios...</p>}
+						{!reposPending && !repos.length && <p className='text-muted-foreground text-sm'>Nenhum repositório liberado para o App.</p>}
 						{repos.map((repo) => (
 							<label key={repo.id} className='flex items-center gap-2 text-sm'>
 								<input type='checkbox' name='repoIds' value={repo.id} />
 								{repo.fullName}
 							</label>
 						))}
-						<a href={githubInstallUrl} className='mt-1 text-xs text-muted-foreground underline'>
+						<a href={githubInstallUrl} className='text-muted-foreground mt-1 text-xs underline'>
 							Liberar outros repositórios no GitHub
 						</a>
 					</fieldset>
@@ -83,13 +82,12 @@ function ProjectsList({ ...props }: Props) {
 
 			<List
 				items={projects}
+				onItemClick={(p) => setSelectedId(p.id)}
 				renderItem={(project) => (
 					<>
 						<div className='min-w-0'>
 							<h3 className='truncate text-xl font-semibold'>{project.name}</h3>
-							<p className='truncate text-sm text-muted-foreground'>
-								{project.repos.map((r) => r.fullName).join(', ')}
-							</p>
+							<p className='text-muted-foreground truncate text-sm'>{project.repos.map((r) => r.fullName).join(', ')}</p>
 						</div>
 						<IconButton
 							icon='trash-2'
@@ -103,6 +101,8 @@ function ProjectsList({ ...props }: Props) {
 					</>
 				)}
 			/>
+
+			{selected && <ProjectApis key={selected.id} project={selected} />}
 		</div>
 	);
 }
