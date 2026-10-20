@@ -5,7 +5,7 @@ import {
 	DropdownMenuLabel,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdownMenu';
-import { mockProjects } from '@/features/projects/mock';
+import { useProjects } from '@/features/projects/api';
 
 interface Props {
 	selectedIds: string[];
@@ -15,12 +15,17 @@ interface Props {
 }
 
 function ProjectPicker({ selectedIds, onToggle, children }: Props) {
+	const { data: projects = [], isPending } = useProjects();
+
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>{children}</DropdownMenuTrigger>
 			<DropdownMenuContent className='w-56'>
 				<DropdownMenuLabel>Projetos</DropdownMenuLabel>
-				{mockProjects.map((project) => (
+				{!isPending && !projects.length && (
+					<p className='px-2 py-1.5 text-sm text-muted-foreground'>Nenhum projeto criado</p>
+				)}
+				{projects.map((project) => (
 					<DropdownMenuCheckboxItem
 						key={project.id}
 						checked={selectedIds.includes(project.id)}

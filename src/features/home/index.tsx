@@ -1,5 +1,5 @@
 import { InputChat } from '@/features/home/inputChat';
-import { mockProjects } from '@/features/projects/mock';
+import { useProjects } from '@/features/projects/api';
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import { Conversation, type Message } from './conversation';
@@ -10,6 +10,7 @@ export default function Home() {
 	const [messages, setMessages] = useState<Message[]>([]);
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
 	const [typing, setTyping] = useState(false);
+	const { data: projects = [] } = useProjects();
 	const empty = messages.length === 0;
 
 	function toggleProject(id: string) {
@@ -20,8 +21,8 @@ export default function Home() {
 		setMessages((prev) => [...prev, { id: crypto.randomUUID(), role: 'user', content }]);
 		setTyping(true);
 
-		// ponytail: streaming mock via setInterval, trocar pelo stream da API
-		const names = mockProjects.filter((p) => selectedIds.includes(p.id)).map((p) => p.name);
+		// ponytail: resposta simulada via setInterval até existir POST /conversations/:id/messages no service
+		const names = projects.filter((p) => selectedIds.includes(p.id)).map((p) => p.name);
 		const reply = `Resposta simulada${names.length ? ` com base em: ${names.join(', ')}` : ''}.\n\nEsta mensagem chega em pedaços para simular o streaming: cada letra nova aparece com fade de opacidade. A integração com a API ainda não foi feita.`;
 		const id = crypto.randomUUID();
 		const update = (patch: Partial<Message>) =>

@@ -1,7 +1,7 @@
 import { IconButton } from '@/components/ui/iconButton';
 import { Icon } from '@/components/ui/icons';
 import { TextField } from '@/components/ui/textField';
-import { mockProjects } from '@/features/projects/mock';
+import { useProjects } from '@/features/projects/api';
 import { cn } from '@/lib/cn';
 import { useState } from 'react';
 import { ProjectPicker } from '../projectPicker';
@@ -16,7 +16,8 @@ interface Props {
 
 function InputChat({ selectedIds, onToggleProject, onSend, disabled, className }: Props) {
 	const [value, setValue] = useState('');
-	const selected = mockProjects.filter((p) => selectedIds.includes(p.id));
+	const { data: projects = [] } = useProjects();
+	const selected = projects.filter((p) => selectedIds.includes(p.id));
 	const canSend = !!value.trim() && !disabled;
 
 	function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {

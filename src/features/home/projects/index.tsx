@@ -1,5 +1,5 @@
 import { Icon } from '@/components/ui/icons';
-import { mockProjects } from '@/features/projects/mock';
+import { useProjects } from '@/features/projects/api';
 import { cn } from '@/lib/cn';
 import { ProjectPicker } from '../projectPicker';
 
@@ -12,8 +12,8 @@ const cardClass =
 	'flex shrink-0 items-center gap-2 rounded-lg border border-border px-3 py-2 text-left text-sm whitespace-nowrap transition-colors hover:bg-card';
 
 function Projects({ selectedIds, onToggle }: Props) {
-	// TODO: trocar pelos 5 projetos mais recentes da API
-	const recent = mockProjects.slice(0, 5);
+	const { data: projects = [] } = useProjects();
+	const recent = projects.slice(0, 5);
 
 	return (
 		<div className='flex gap-2 overflow-x-auto pb-1 md:grid md:grid-cols-3 md:overflow-visible md:pb-0'>
