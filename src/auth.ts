@@ -1,0 +1,119 @@
+import { Hono } from 'hono';
+import { createMiddleware } from 'hono/factory';
+import { db } from './db';
+import { env } from './env';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const SESSION_TTL_MS = 7 * DAY_MS;
+const STATE_TTL_MS = 10 * 60 * 1000;
+
+export type AuthVars = { userId: string; workspaceId: string; tokenHash: string };
+
+const randomToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+export const sha256 = (s: string) => new Bun.CryptoHasher('sha256').update(s).digest('hex');
+
+// Single entry point for auth; a host JWT branch can be added here later.
+export const requireAuth = createMiddleware<{ Variables: AuthVars }>(async (c, next) => {
+	const token = c.req.header('Authorization')?.match(/^Bearer (.+)$/)?.[1];
+	if (!token) return c.json({ error: 'unauthorized' }, 401);
+
+	const tokenHash = sha256(token);
+	const session = await db.session.findUnique({
+		where: { tokenHash },
+		include: { user: { include: { memberships: { take: 1 } } } },
+	});
+	const membership = session?.user.memberships[0];
+	if (!session || session.expiresAt < new Date() || !membership) return c.json({ error: 'unauthorized' }, 401);
+
+	// Sliding TTL; refresh at most once a day to avoid a write per request.
+	if (session.expiresAt.getTime() - Date.now() < SESSION_TTL_MS - DAY_MS) {
+		await db.session.update({ where: { id: session.id }, data: { expiresAt: new Date(Date.now() + SESSION_TTL_MS) } });
+	}
+
+	c.set('userId', session.userId);
+	c.set('workspaceId', membership.workspaceId);
+	c.set('tokenHash', tokenHash);
+	await next();
+});
+
+export const auth = new Hono<{ Variables: AuthVars }>();
+
+auth.get('/auth/github/login', async (c) => {
+	const state = randomToken();
+	await db.oAuthState.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+	await db.oAuthState.create({ data: { state, kind: 'login', expiresAt: new Date(Date.now() + STATE_TTL_MS) } });
+
+	const url = new URL('https://github.com/login/oauth/authorize');
+	url.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+	url.searchParams.set('state', state);
+	return c.redirect(url.toString());
+});
+
+auth.get('/auth/github/callback', async (c) => {
+	const fail = (error: string) => c.redirect(`${env.FRONTEND_URL}/login#error=${error}`);
+	const { code, state } = c.req.query();
+	if (!code || !state) return fail('invalid_request');
+
+	// Deleting consumes the state: single use.
+	const { count } = await db.oAuthState.deleteMany({ where: { state, kind: 'login', expiresAt: { gt: new Date() } } });
+	if (!count) return fail('invalid_state');
+
+	const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+		method: 'POST',
+		headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+		body: JSON.stringify({ client_id: env.GITHUB_CLIENT_ID, client_secret: env.GITHUB_CLIENT_SECRET, code }),
+	});
+	const { access_token } = (await tokenRes.json()) as { access_token?: string };
+	if (!access_token) return fail('github_error');
+
+	const userRes = await fetch('https://api.github.com/user', {
+		headers: { Authorization: `Bearer ${access_token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'stocko' },
+	});
+	if (!userRes.ok) return fail('github_error');
+	const gh = (await userRes.json()) as { id: number; login: string; name: string | null; avatar_url: string };
+
+	if (!env.ALLOWED_GITHUB_LOGINS.includes(gh.login.toLowerCase())) return fail('forbidden');
+
+	const profile = { name: gh.name ?? gh.login, avatarUrl: gh.avatar_url };
+	const subject = String(gh.id);
+	const identity = await db.identity.findUnique({ where: { provider_subject: { provider: 'github', subject } } });
+	const userId = identity
+		? (await db.identity.update({ where: { id: identity.id }, data: { login: gh.login, user: { update: profile } } }))
+				.userId
+		: (
+				await db.user.create({
+					data: {
+						...profile,
+						identities: { create: { provider: 'github', subject, login: gh.login } },
+						// MVP: one workspace per user, created on signup.
+						memberships: { create: { workspace: { create: { name: gh.login } } } },
+					},
+				})
+			).id;
+
+	const token = randomToken();
+	await db.session.create({
+		data: { tokenHash: sha256(token), userId, expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
+	});
+	// Fragment never reaches servers or logs.
+	return c.redirect(`${env.FRONTEND_URL}/login#token=${token}`);
+});
+
+auth.post('/auth/logout', requireAuth, async (c) => {
+	await db.session.delete({ where: { tokenHash: c.var.tokenHash } });
+	return c.body(null, 204);
+});
+
+auth.get('/me', requireAuth, async (c) => {
+	const user = await db.user.findUniqueOrThrow({
+		where: { id: c.var.userId },
+		include: { identities: { where: { provider: 'github' }, take: 1 } },
+	});
+	return c.json({
+		id: user.id,
+		name: user.name,
+		avatarUrl: user.avatarUrl,
+		login: user.identities[0]?.login ?? null,
+		workspaceId: c.var.workspaceId,
+	});
+});

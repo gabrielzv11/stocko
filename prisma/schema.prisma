@@ -1,0 +1,195 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "bun"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- auth ----------
+
+model User {
+  id          String       @id @default(cuid())
+  name        String?
+  avatarUrl   String?
+  createdAt   DateTime     @default(now())
+  identities  Identity[]
+  sessions    Session[]
+  memberships Member[]
+}
+
+/// Login provider link. Future host IdP becomes another provider.
+model Identity {
+  id       String @id @default(cuid())
+  userId   String
+  provider String // 'github'
+  subject  String // provider user id
+  login    String?
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+}
+
+/// Opaque bearer token; only its sha256 is stored.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// CSRF state for OAuth login and GitHub App install flows.
+model OAuthState {
+  state     String   @id
+  kind      String // 'login' | 'install'
+  userId    String?
+  expiresAt DateTime
+}
+
+// ---------- tenancy ----------
+
+model Workspace {
+  id            String         @id @default(cuid())
+  name          String
+  createdAt     DateTime       @default(now())
+  members       Member[]
+  installations Installation[]
+  repositories  Repository[]
+  projects      Project[]
+  conversations Conversation[]
+}
+
+model Member {
+  workspaceId String
+  userId      String
+  role        String    @default("owner")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+// ---------- github ----------
+
+model Installation {
+  id                   String       @id @default(cuid())
+  workspaceId          String
+  githubInstallationId BigInt       @unique
+  accountLogin         String
+  createdAt            DateTime     @default(now())
+  workspace            Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  repositories         Repository[]
+}
+
+/// One clone per repository per workspace, shared by N projects.
+model Repository {
+  id             String          @id @default(cuid())
+  workspaceId    String
+  installationId String
+  githubRepoId   BigInt
+  fullName       String
+  defaultBranch  String
+  sizeKb         Int?
+  createdAt      DateTime        @default(now())
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installation   Installation    @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  branches       RepoBranch[]
+  sources        ProjectSource[]
+
+  @@unique([workspaceId, githubRepoId])
+}
+
+enum BranchStatus {
+  pending
+  syncing
+  ready
+  error
+}
+
+/// Observed branch. Lower priority value = higher precedence in the cascade.
+model RepoBranch {
+  id            String       @id @default(cuid())
+  repositoryId  String
+  name          String
+  priority      Int
+  status        BranchStatus @default(pending)
+  lastSyncedSha String?
+  error         String?
+  updatedAt     DateTime     @updatedAt
+  repository    Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, name])
+  @@index([status])
+}
+
+// ---------- projects ----------
+
+model Project {
+  id            String          @id @default(cuid())
+  workspaceId   String
+  name          String
+  createdAt     DateTime        @default(now())
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sources       ProjectSource[]
+  conversations Conversation[]
+
+  @@index([workspaceId])
+}
+
+enum SourceType {
+  github_repo
+  doc
+  jira
+}
+
+model ProjectSource {
+  id           String      @id @default(cuid())
+  projectId    String
+  type         SourceType
+  repositoryId String?
+  config       Json?
+  createdAt    DateTime    @default(now())
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository   Repository? @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, repositoryId])
+}
+
+// ---------- chat ----------
+
+model Conversation {
+  id                       String    @id @default(cuid())
+  workspaceId              String
+  projectId                String
+  title                    String?
+  pinned                   Boolean   @default(false)
+  summary                  String?
+  summarizedUntilMessageId String?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project                  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  messages                 Message[]
+
+  @@index([workspaceId, updatedAt])
+  @@index([projectId, updatedAt])
+}
+
+/// parts = AI SDK UIMessage parts (text, tool calls, citations).
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String
+  parts          Json
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
