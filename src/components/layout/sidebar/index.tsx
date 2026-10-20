@@ -1,5 +1,6 @@
 import { IconButton } from '@/components/ui/iconButton';
 import { Icon } from '@/components/ui/icons';
+import { useConversations } from '@/features/home/api';
 import { cn } from '@/lib/cn';
 import { NavLink } from 'react-router-dom';
 import { Profile } from '../profile';
@@ -15,6 +16,32 @@ export const isMobile = () => window.matchMedia('(max-width: 767px)').matches;
 
 const itemClass =
 	'flex items-center gap-3 rounded-lg px-2 py-1.5 text-sm whitespace-nowrap transition-colors hover:bg-card';
+
+function ConversationList({ onNavigate }: { onNavigate: () => void }) {
+	const { data: conversations = [] } = useConversations();
+	if (!conversations.length) return null;
+
+	return (
+		<nav aria-label='Conversas' className='flex flex-col gap-0.5'>
+			<h2 className='px-2 pt-2 pb-1 text-xs text-muted-foreground'>Conversas</h2>
+			{conversations.map((c) => (
+				<NavLink
+					key={c.id}
+					to={`/c/${c.id}`}
+					onClick={onNavigate}
+					className={({ isActive }) =>
+						cn('flex flex-col rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-card', isActive && 'bg-card')
+					}
+				>
+					<span className='truncate'>{c.title || 'Sem título'}</span>
+					{c.projects.length > 0 && (
+						<span className='truncate text-xs text-muted-foreground'>{c.projects.map((p) => p.name).join(', ')}</span>
+					)}
+				</NavLink>
+			))}
+		</nav>
+	);
+}
 
 function Sidebar({ collapsed, onCollapsedChange, className, ...props }: SidebarProps) {
 	const closeOnMobile = () => isMobile() && onCollapsedChange(true);
@@ -59,7 +86,10 @@ function Sidebar({ collapsed, onCollapsedChange, className, ...props }: SidebarP
 				</nav>
 			</div>
 
-			<div className='flex-1' />
+			{/* Recolhida não há espaço para títulos; o flex-1 segue empurrando o perfil para baixo. */}
+			<div className='flex min-h-0 flex-1 flex-col overflow-y-auto px-2 pb-2'>
+				{!collapsed && <ConversationList onNavigate={closeOnMobile} />}
+			</div>
 
 			<div className='border-t border-card-border p-2'>
 				<Profile collapsed={collapsed} />

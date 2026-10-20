@@ -11,8 +11,9 @@ import { api } from '@/lib/api';
 import { clearToken, githubInstallUrl } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import { useQuery } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 
-type Me = { id: string; name: string | null; avatarUrl: string | null; login: string | null; workspaceId: string };
+type Me = { id: string; name: string | null; avatarUrl: string | null; login: string | null; workspaceId: string; hasInstallation: boolean };
 
 async function logout() {
 	await api.post('/auth/logout').catch(() => {});
@@ -25,6 +26,7 @@ interface Props {
 }
 
 function Profile({ collapsed }: Props) {
+	const navigate = useNavigate();
 	const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/me').then((r) => r.data) });
 	const name = me?.name ?? me?.login ?? '';
 	const initials = name
@@ -64,7 +66,10 @@ function Profile({ collapsed }: Props) {
 				<DropdownMenuContent side='top'>
 					<DropdownMenuGroup>
 						<DropdownMenuLabel>Configurações</DropdownMenuLabel>
-						<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl)}>Conectar GitHub</DropdownMenuItem>
+						<DropdownMenuItem onSelect={() => navigate('/usage')}>Uso</DropdownMenuItem>
+						<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl)}>
+							{me?.hasInstallation ? 'Gerenciar acesso ao GitHub' : 'Conectar ao GitHub'}
+						</DropdownMenuItem>
 						<DropdownMenuItem onSelect={logout}>Sair</DropdownMenuItem>
 					</DropdownMenuGroup>
 				</DropdownMenuContent>

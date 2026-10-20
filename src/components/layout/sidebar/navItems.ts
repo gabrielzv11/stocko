@@ -8,5 +8,4 @@ export interface NavItem {
 
 export const navItems: NavItem[] = [
 	{ title: 'Nova conversa', icon: 'plus', to: '/' },
-	{ title: 'Projetos', icon: 'folder', to: '/projects' },
-];
+	{ title: 'Projetos', icon: 'folder', to: '/projects' },];
