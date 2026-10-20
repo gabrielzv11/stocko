@@ -164,10 +164,10 @@ model ProjectSource {
 
 // ---------- chat ----------
 
+/// Belongs to the workspace; projects are linked by the agent (link_projects) only when the question is clearly about them.
 model Conversation {
   id                       String    @id @default(cuid())
   workspaceId              String
-  projectId                String
   title                    String?
   pinned                   Boolean   @default(false)
   summary                  String?
@@ -175,11 +175,10 @@ model Conversation {
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  project                  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  projects                 Project[]
   messages                 Message[]
 
   @@index([workspaceId, updatedAt])
-  @@index([projectId, updatedAt])
 }
 
 /// parts = AI SDK UIMessage parts (text, tool calls, citations).
@@ -188,6 +187,13 @@ model Message {
   conversationId String
   role           String
   parts          Json
+  /// Usage of the agent turn (assistant messages only), summed over its steps.
+  model          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  cachedTokens   Int?
+  /// USD charged by OpenRouter.
+  cost           Decimal?     @db.Decimal(12, 6)
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

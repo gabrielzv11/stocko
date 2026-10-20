@@ -8,10 +8,6 @@ const app = { appId: env.GITHUB_APP_ID, privateKey: env.GITHUB_APP_PRIVATE_KEY }
 export const installationOctokit = (installationId: number) =>
 	new Octokit({ authStrategy: createAppAuth, auth: { ...app, installationId } });
 
-/** Clona (ou atualiza) um repo para o agente navegar */
-export async function cloneRepo(installationId: number, owner: string, repo: string, dest: string): Promise<void> {
-	const { token } = await createAppAuth({ ...app, installationId })({ type: 'installation' });
-	const url = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
-	const proc = Bun.spawn(['git', 'clone', '--depth=1', url, dest]);
-	if ((await proc.exited) !== 0) throw new Error(`Falha ao clonar ${owner}/${repo}`);
-}
+/** Token de instalação (1h) para git clone/fetch. */
+export const installationToken = async (installationId: number) =>
+	(await createAppAuth({ ...app, installationId })({ type: 'installation' })).token;

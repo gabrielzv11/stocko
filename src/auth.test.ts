@@ -6,6 +6,7 @@ process.env.ALLOWED_GITHUB_LOGINS ??= '';
 process.env.GITHUB_APP_ID ||= 'test';
 process.env.GITHUB_APP_SLUG ||= 'test';
 process.env.GITHUB_APP_PRIVATE_KEY ||= '-----BEGIN PRIVATE KEY-----test';
+process.env.OPENROUTER_API_KEY ||= 'test';
 
 const { auth, sha256 } = await import('./auth');
 const { db } = await import('./db');

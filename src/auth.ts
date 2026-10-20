@@ -121,15 +121,19 @@ auth.post('/auth/logout', requireAuth, async (c) => {
 });
 
 auth.get('/me', requireAuth, async (c) => {
-	const user = await db.user.findUniqueOrThrow({
-		where: { id: c.var.userId },
-		include: { identities: { where: { provider: 'github' }, take: 1 } },
-	});
+	const [user, installations] = await Promise.all([
+		db.user.findUniqueOrThrow({
+			where: { id: c.var.userId },
+			include: { identities: { where: { provider: 'github' }, take: 1 } },
+		}),
+		db.installation.count({ where: { workspaceId: c.var.workspaceId } }),
+	]);
 	return c.json({
 		id: user.id,
 		name: user.name,
 		avatarUrl: user.avatarUrl,
 		login: user.identities[0]?.login ?? null,
 		workspaceId: c.var.workspaceId,
+		hasInstallation: installations > 0,
 	});
 });

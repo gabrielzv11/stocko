@@ -1,0 +1,169 @@
+import { createOpenRouter } from '@openrouter/ai-sdk-provider';
+import {
+	convertToModelMessages,
+	stepCountIs,
+	streamText,
+	tool,
+	type LanguageModelUsage,
+	type ProviderMetadata,
+	type UIMessage,
+} from 'ai';
+import { Hono } from 'hono';
+import { z } from 'zod';
+import { agentTools } from './agent';
+import { requireAuth, type AuthVars } from './auth';
+import { db } from './db';
+import { env } from './env';
+import type { Prisma } from './generated/prisma/client';
+import { refreshStale } from './repos';
+
+const openrouter = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
+const MAX_STEPS = 25;
+const MAX_TITLE = 80;
+
+const body = z.object({
+	// Só a pergunta nova, só texto: o histórico vem do banco, então o cliente não consegue reescrevê-lo.
+	message: z.object({
+		role: z.literal('user'),
+		parts: z.array(z.object({ type: z.literal('text'), text: z.string().trim().min(1) })).min(1),
+	}),
+	projectIds: z.array(z.string()).default([]),
+});
+
+/** Tokens and OpenRouter cost of the whole turn (every agent step). Null fields if the stream died mid-way. */
+async function turnUsage(result: {
+	totalUsage: PromiseLike<LanguageModelUsage>;
+	steps: PromiseLike<{ providerMetadata?: ProviderMetadata }[]>;
+}) {
+	try {
+		const [usage, steps] = await Promise.all([result.totalUsage, result.steps]);
+		const cost = steps.reduce((sum, s) => sum + (Number((s.providerMetadata?.openrouter?.usage as { cost?: number })?.cost) || 0), 0);
+		return {
+			model: env.LLM_MODEL,
+			inputTokens: usage.inputTokens ?? null,
+			outputTokens: usage.outputTokens ?? null,
+			cachedTokens: usage.inputTokenDetails?.cacheReadTokens ?? null,
+			cost,
+		};
+	} catch {
+		return { model: env.LLM_MODEL };
+	}
+}
+
+export const chat = new Hono<{ Variables: AuthVars }>();
+
+const linkedProjects = { select: { id: true, name: true }, orderBy: { name: 'asc' } } as const;
+
+// ponytail: últimas 100, sem paginação; cursor por updatedAt quando a lista crescer.
+chat.get('/conversations', requireAuth, async (c) => {
+	const list = await db.conversation.findMany({
+		where: { workspaceId: c.var.workspaceId },
+		orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
+		take: 100,
+		select: { id: true, title: true, pinned: true, updatedAt: true, projects: linkedProjects },
+	});
+	return c.json(list);
+});
+
+chat.get('/conversations/:id', requireAuth, async (c) => {
+	const conversation = await db.conversation.findFirst({
+		where: { id: c.req.param('id'), workspaceId: c.var.workspaceId },
+		select: {
+			id: true,
+			title: true,
+			projects: linkedProjects,
+			messages: { orderBy: { createdAt: 'asc' }, select: { id: true, role: true, parts: true } },
+		},
+	});
+	return conversation ? c.json(conversation) : c.json({ error: 'not_found' }, 404);
+});
+
+// :id vem do useChat; a conversa nasce na primeira mensagem, sem projeto (o agente vincula depois).
+chat.post('/conversations/:id/messages', requireAuth, async (c) => {
+	const id = c.req.param('id');
+	if (!/^[\w-]{1,64}$/.test(id)) return c.json({ error: 'invalid_id' }, 400);
+	const parsed = body.safeParse(await c.req.json().catch(() => null));
+	if (!parsed.success) return c.json({ error: 'invalid_body' }, 400);
+	const { workspaceId } = c.var;
+	const { message, projectIds } = parsed.data;
+
+	// Anti-IDOR: id de conversa de outro workspace parece inexistente.
+	const owner = await db.conversation.findUnique({ where: { id }, select: { workspaceId: true } });
+	if (owner && owner.workspaceId !== workspaceId) return c.json({ error: 'not_found' }, 404);
+
+	// Pergunta salva antes de rodar o agente: não se perde se o modelo falhar.
+	const newMessage = { role: 'user', parts: message.parts };
+	const conversation = await db.conversation.upsert({
+		where: { id },
+		create: { id, workspaceId, title: message.parts.map((p) => p.text).join(' ').slice(0, MAX_TITLE), messages: { create: newMessage } },
+		update: { messages: { create: newMessage } },
+		include: { projects: { select: { id: true } }, messages: { orderBy: { createdAt: 'asc' } } },
+	});
+	const history = conversation.messages.map((m) => ({ id: m.id, role: m.role, parts: m.parts }) as UIMessage);
+
+	// Workspace filter (anti-IDOR). No project selected → every project in the workspace.
+	const projects = await db.project.findMany({
+		where: { workspaceId, ...(projectIds.length && { id: { in: projectIds } }) },
+		include: { sources: { include: { repository: true } } },
+	});
+	const repos = [
+		...new Map(projects.flatMap((p) => p.sources.flatMap((s) => (s.repository ? [[s.repository.id, s.repository]] : [])))).values(),
+	];
+	await refreshStale(repos.map((r) => r.id));
+
+	const context = projects
+		.map((p) => `- ${p.name} (id: ${p.id}): ${p.sources.flatMap((s) => s.repository?.fullName ?? []).join(', ') || 'sem repositórios'}`)
+		.join('\n');
+	const linked = projects.filter((p) => conversation.projects.some((l) => l.id === p.id)).map((p) => p.name);
+
+	const result = streamText({
+		// usage.include: OpenRouter devolve o custo (USD) de cada passo em providerMetadata.
+		model: openrouter(env.LLM_MODEL, { usage: { include: true } }),
+		system: [
+			'Você é o Stocko, assistente que responde perguntas sobre os produtos de software do usuário lendo o código dos repositórios. Responda em português do Brasil.',
+			'Use as tools (list_repos, glob, grep, read_file) para encontrar a resposta no código antes de responder. Não invente arquivos, trechos ou comportamentos; se não encontrar, diga.',
+			'Cite as fontes no formato `owner/repo/caminho#Lx-Ly@sha` (sha curto vindo do read_file).',
+			'Vínculo da conversa: assim que tiver certeza de que a pergunta é sobre um ou mais projetos da lista, chame link_projects uma vez com os ids de todos os envolvidos. Em dúvida, ou se a pergunta não for sobre um projeto listado, não chame. Não repita projetos já vinculados.',
+			context ? `Projetos:\n${context}` : 'Nenhum projeto cadastrado: peça ao usuário para criar um projeto com repositórios.',
+			linked.length ? `Já vinculados a esta conversa: ${linked.join(', ')}` : '',
+		]
+			.filter(Boolean)
+			.join('\n\n'),
+		messages: await convertToModelMessages(history),
+		tools: {
+			...agentTools(repos.map((r) => ({ id: r.id, fullName: r.fullName }))),
+			link_projects: tool({
+				description: 'Vincula esta conversa a projetos da lista. Só quando a pergunta for claramente sobre eles.',
+				inputSchema: z.object({ projectIds: z.array(z.string()).min(1) }),
+				execute: async (input) => {
+					// Só projetos do contexto, já filtrados pelo workspace.
+					const chosen = projects.filter((p) => input.projectIds.includes(p.id));
+					if (!chosen.length) return 'erro: projeto desconhecido; use os ids da lista de projetos.';
+					await db.conversation.update({
+						where: { id },
+						data: { projects: { connect: chosen.map((p) => ({ id: p.id })) } },
+					});
+					return `vinculado: ${chosen.map((p) => p.name).join(', ')}`;
+				},
+			}),
+		},
+		stopWhen: stepCountIs(MAX_STEPS),
+	});
+
+	// Roda até o fim (e salva) mesmo se o cliente desconectar no meio.
+	void result.consumeStream();
+	return result.toUIMessageStreamResponse({
+		originalMessages: history,
+		onEnd: async ({ responseMessage }) => {
+			if (!responseMessage.parts.length) return;
+			await db.conversation.update({
+				where: { id },
+				data: {
+					messages: {
+						create: { role: 'assistant', parts: responseMessage.parts as Prisma.InputJsonValue, ...(await turnUsage(result)) },
+					},
+				},
+			});
+		},
+	});
+});

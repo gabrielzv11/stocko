@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireAuth, type AuthVars } from './auth';
 import { installationOctokit } from './client';
 import { db } from './db';
+import { syncRepo } from './repos';
 
 /** Repos the App can reach across the workspace's installations, most recently pushed first. */
 async function accessibleRepos(workspaceId: string) {
@@ -89,6 +90,8 @@ projects.post('/projects', requireAuth, async (c) => {
 			sources: { create: rows.map((r) => ({ type: 'github_repo' as const, repositoryId: r.id })) },
 		},
 	});
+	// Clone in the background so the first question finds the code ready.
+	for (const r of rows) void syncRepo(r.id);
 	return c.json({ id: project.id }, 201);
 });
 

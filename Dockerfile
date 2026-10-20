@@ -1,6 +1,6 @@
 FROM oven/bun:1.2.22
-# git + ripgrep: used by repo sync and the agent's grep tool
-RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep ca-certificates \
+# git: repo sync and the agent's grep tool (git grep -P)
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
 	&& rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json bun.lock ./

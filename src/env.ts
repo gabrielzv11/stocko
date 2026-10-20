@@ -16,6 +16,12 @@ const schema = z.object({
 		.transform((s) => s.replace(/\\n/g, '\n'))
 		// Fingerprint (SHA256:...) in place of the .pem only fails on the first GitHub call; fail at boot instead.
 		.refine((s) => s.includes('PRIVATE KEY-----'), 'expected .pem content, not the key fingerprint'),
+	// OpenRouter (openrouter.ai/keys). Model is any OpenRouter slug; avoid `:free` with client code.
+	OPENROUTER_API_KEY: z.string().min(1),
+	LLM_MODEL: z.string().default('anthropic/claude-sonnet-5.5'),
+	// Shallow clones the agent searches. Railway: volume mounted at /data/repos.
+	REPOS_DIR: z.string().default('./data/repos'),
+	MAX_REPO_SIZE_MB: z.coerce.number().default(500),
 	// Comma-separated GitHub logins allowed to sign in.
 	ALLOWED_GITHUB_LOGINS: z.string().transform((s) =>
 		s
