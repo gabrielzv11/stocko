@@ -4,6 +4,7 @@ import { logger } from 'hono/logger';
 import { auth } from './auth';
 import { db } from './db';
 import { env } from './env';
+import { projects } from './projects';
 
 const app = new Hono();
 
@@ -17,5 +18,6 @@ app.get('/health', async (c) => {
 });
 
 app.route('/', auth);
+app.route('/', projects);
 
 export default { port: env.PORT, fetch: app.fetch };

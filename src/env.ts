@@ -13,7 +13,9 @@ const schema = z.object({
 	GITHUB_APP_PRIVATE_KEY: z
 		.string()
 		.min(1)
-		.transform((s) => s.replace(/\\n/g, '\n')),
+		.transform((s) => s.replace(/\\n/g, '\n'))
+		// Fingerprint (SHA256:...) in place of the .pem only fails on the first GitHub call; fail at boot instead.
+		.refine((s) => s.includes('PRIVATE KEY-----'), 'expected .pem content, not the key fingerprint'),
 	// Comma-separated GitHub logins allowed to sign in.
 	ALLOWED_GITHUB_LOGINS: z.string().transform((s) =>
 		s
