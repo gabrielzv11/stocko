@@ -22,6 +22,8 @@ const schema = z.object({
 	// Shallow clones the agent searches. Railway: volume mounted at /data/repos.
 	REPOS_DIR: z.string().default('./data/repos'),
 	MAX_REPO_SIZE_MB: z.coerce.number().default(500),
+	// Agent's grep: 'git' (git grep -P on the bare repo) or 'zoekt' (trigram index; binaries only in the Docker image).
+	GREP_BACKEND: z.enum(['git', 'zoekt']).default('git'),
 	// 32 random bytes in base64 (`openssl rand -base64 32`). Encrypts API auth headers; only needed to save one.
 	SECRETS_KEY: z
 		.string()

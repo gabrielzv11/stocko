@@ -40,7 +40,8 @@ Conversation 1─N Message { role, parts jsonb }
 
 ## Repositórios e branches
 
-- Clone em `/data/repos/<repoId>/.git`, `git worktree` por branch em `wt/<slug>`, `fetch --depth=1`.
+- Repo **bare** em `/data/repos/<repoId>`, `fetch --depth=1` por branch em `refs/heads/<branch>`; sem checkout nem worktree. As tools leem objetos pelo SHA (`ls-tree`, `git grep <sha>`, `cat-file`), então branches compartilham blobs e o disco é só o pack.
+- `grep` com backend em `GREP_BACKEND`: `git` (PCRE) ou `zoekt` (RE2, ranking por relevância; shards em `/data/repos/.zoekt`, indexados após o fetch; sem shard do repo cai no git).
 - Branches observadas definidas pelo usuário (máx. 5/repo), **ordenadas por prioridade** (drag + ↑↓ na UI).
 - **Cascata**: ref padrão das tools = branch `ready` de maior prioridade. Se algo não existe na de topo, o agente busca na próxima e informa a branch ("não está em `main`, existe em `develop`").
 - Histórico (`list_commits`) via API GitHub — o clone raso não tem histórico.
@@ -53,7 +54,7 @@ Conversation 1─N Message { role, parts jsonb }
 - Webhook `push` (HMAC validado na nossa rota) → evento. Só branches observadas.
 - Webhook `installation_repositories.removed` → remove repo/clone.
 - Cron `*/30 * * * *`: reconcilia SHA remoto × `lastSyncedSha`.
-- Lock RW em memória entre sync e tools do agente.
+- Sem lock entre sync e tools: fetch só acrescenta objetos e o SHA fica fixo por turno do agente. Tools só esperam o primeiro sync.
 - No boot: branches `syncing` → `pending`.
 - Limite de tamanho por repo (`MAX_REPO_SIZE_MB`).
 
