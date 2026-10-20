@@ -1,0 +1,65 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@import 'tailwindcss';
+
+:root {
+	/* base */
+	--primary: oklch(100% 0.00011 271.152);
+	--primary-foreground: oklch(0% 0 0);
+	--background: oklch(0% 0 0);
+
+	--background-soft: oklch(24.314% 0.00184 106.772);
+	--foreground: oklch(0.96 0.008 90);
+
+	--muted: oklch(32.124% 0.00551 271.251);
+	--muted-foreground: oklch(0.74 0.018 264);
+
+	/* surfaces */
+	--card: oklch(26.448% 0.00003 271.152);
+	--card-border: oklch(0.95 0.02 90 / 0.08);
+	--ring: oklch(0.86 0.1 84 / 0.5);
+	--border: oklch(95% 0.01955 87.501 / 0.144);
+
+	--popover: oklch(29.313% 0.00003 271.152);
+	--popover-foreground: oklch(0.985 0.002 247.839);
+
+	/* shadcn compat */
+	--input: oklch(29.82% 0.00143 15.934);
+	--input-foreground: oklch(0.96 0.008 90);
+
+	--accent: oklch(0.96 0.008 90);
+	--accent-foreground: oklch(60.325% 0.00007 271.152);
+}
+
+@theme inline {
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+
+	--color-background: var(--background);
+	--color-background-soft: var(--background-soft);
+	--color-foreground: var(--foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+
+	--color-card: var(--card);
+	--color-card-border: var(--card-border);
+	--color-ring: var(--ring);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-input: var(--input);
+	--color-input-foreground: var(--input-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+
+	--font-body: var(--font-sen), ui-sans-serif, system-ui, sans-serif;
+	--font-display: var(--font-playfair), ui-serif, Georgia, serif;
+
+	--color-border: var(--border);
+}
+
+@layer base {
+	body {
+		@apply m-0 box-border tracking-wide bg-background text-foreground;
+	}
+}
