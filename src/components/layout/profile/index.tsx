@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/dropdownMenu';
 import { Icon } from '@/components/ui/icons';
 import { api } from '@/lib/api';
-import { clearToken } from '@/lib/auth';
+import { clearToken, githubInstallUrl } from '@/lib/auth';
 import { cn } from '@/lib/cn';
 import { useQuery } from '@tanstack/react-query';
 
@@ -64,6 +64,7 @@ function Profile({ collapsed }: Props) {
 				<DropdownMenuContent side='top'>
 					<DropdownMenuGroup>
 						<DropdownMenuLabel>Configurações</DropdownMenuLabel>
+						<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl)}>Conectar GitHub</DropdownMenuItem>
 						<DropdownMenuItem onSelect={logout}>Sair</DropdownMenuItem>
 					</DropdownMenuGroup>
 				</DropdownMenuContent>
