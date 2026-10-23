@@ -58,7 +58,8 @@ test('feedback: only on assistant messages of the own workspace; comes back as m
 	const token = crypto.randomUUID();
 	await db.session.create({ data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
 	const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-	const rate = (id: string, value: 1 | -1 | null) => chat.request(`/messages/${id}/feedback`, { method: 'PUT', headers, body: JSON.stringify({ value }) }).then((r) => r.status);
+	const rate = async (id: string, value: 1 | -1 | null) =>
+		(await chat.request(`/messages/${id}/feedback`, { method: 'PUT', headers, body: JSON.stringify({ value }) })).status;
 
 	try {
 		const conversation = await db.conversation.create({ data: { workspaceId } });
