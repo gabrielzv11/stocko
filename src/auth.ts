@@ -46,8 +46,14 @@ auth.get('/auth/github/login', async (c) => {
 	await db.oAuthState.deleteMany({ where: { expiresAt: { lt: new Date() } } });
 	await db.oAuthState.create({ data: { state, kind: 'login', expiresAt: new Date(Date.now() + STATE_TTL_MS) } });
 
+	// Explicit callback on this host, else GitHub uses the App's first Callback URL (localhost in prod).
+	// Behind a proxy (Railway) the request arrives as http; X-Forwarded-Proto has the real scheme.
+	const callback = new URL('/auth/github/callback', c.req.url);
+	callback.protocol = c.req.header('X-Forwarded-Proto') ?? callback.protocol;
+
 	const url = new URL('https://github.com/login/oauth/authorize');
 	url.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
+	url.searchParams.set('redirect_uri', callback.toString());
 	url.searchParams.set('state', state);
 	return c.redirect(url.toString());
 });
