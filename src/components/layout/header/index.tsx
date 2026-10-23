@@ -1,15 +1,9 @@
-import { IconButton } from '@/components/ui/iconButton';
+interface Props {}
 
-interface Props {
-	onMenuClick: () => void;
-}
-
-function Header({ onMenuClick }: Props) {
+function Header({}: Props) {
 	return (
 		<>
-			<header className='flex shrink-0 items-center p-2'>
-				<IconButton icon='menu' variant='ghost' size='sm' aria-label='Alternar menu' onClick={onMenuClick} />
-			</header>
+			<header className='flex shrink-0 items-center p-2'></header>
 		</>
 	);
 }

@@ -13,7 +13,14 @@ import { cn } from '@/lib/cn';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 
-type Me = { id: string; name: string | null; avatarUrl: string | null; login: string | null; workspaceId: string; hasInstallation: boolean };
+type Me = {
+	id: string;
+	name: string | null;
+	avatarUrl: string | null;
+	login: string | null;
+	workspaceId: string;
+	hasInstallation: boolean;
+};
 
 async function logout() {
 	await api.post('/auth/logout').catch(() => {});
@@ -44,7 +51,7 @@ function Profile({ collapsed }: Props) {
 						aria-label='Perfil'
 						className={cn(
 							'hover:bg-card data-[state=open]:bg-card flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-sm whitespace-nowrap transition-colors outline-none',
-							collapsed && 'justify-center px-0',
+							collapsed && 'justify-center px-0'
 						)}
 					>
 						{me?.avatarUrl ? (
@@ -63,7 +70,7 @@ function Profile({ collapsed }: Props) {
 					</button>
 				</DropdownMenuTrigger>
 
-				<DropdownMenuContent side='top'>
+				<DropdownMenuContent className='w-max' side='top'>
 					<DropdownMenuGroup>
 						<DropdownMenuLabel>Configurações</DropdownMenuLabel>
 						<DropdownMenuItem onSelect={() => navigate('/usage')}>Uso</DropdownMenuItem>

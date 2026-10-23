@@ -1,5 +1,6 @@
 import { IconButton } from '@/components/ui/iconButton';
 import { Icon } from '@/components/ui/icons';
+import { Text } from '@/components/ui/text';
 import { useConversations } from '@/features/home/api';
 import { cn } from '@/lib/cn';
 import { NavLink } from 'react-router-dom';
@@ -9,6 +10,7 @@ import { navItems } from './navItems';
 interface SidebarProps extends React.HTMLAttributes<HTMLElement> {
 	collapsed: boolean;
 	onCollapsedChange: (collapsed: boolean) => void;
+	onMenuClick: () => void;
 }
 
 // Mesmo breakpoint do `md:` do Tailwind
@@ -30,12 +32,17 @@ function ConversationList({ onNavigate }: { onNavigate: () => void }) {
 					to={`/c/${c.id}`}
 					onClick={onNavigate}
 					className={({ isActive }) =>
-						cn('flex flex-col rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-card', isActive && 'bg-card')
+						cn(
+							'flex flex-col rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-card',
+							isActive && 'bg-card'
+						)
 					}
 				>
 					<span className='truncate'>{c.title || 'Sem título'}</span>
 					{c.projects.length > 0 && (
-						<span className='truncate text-xs text-muted-foreground'>{c.projects.map((p) => p.name).join(', ')}</span>
+						<span className='truncate text-xs text-muted-foreground'>
+							{c.projects.map((p) => p.name).join(', ')}
+						</span>
 					)}
 				</NavLink>
 			))}
@@ -43,22 +50,47 @@ function ConversationList({ onNavigate }: { onNavigate: () => void }) {
 	);
 }
 
-function Sidebar({ collapsed, onCollapsedChange, className, ...props }: SidebarProps) {
+function Sidebar({ collapsed, onCollapsedChange, onMenuClick, ...props }: SidebarProps) {
 	const closeOnMobile = () => isMobile() && onCollapsedChange(true);
+
+	// Recolhida, clicar em área vazia expande. Cliques em ações (ou em portais, cujo
+	// evento sintético também borbulha até aqui) seguem só o próprio comportamento.
+	const expandOnClick = (e: React.MouseEvent<HTMLElement>) => {
+		props.onClick?.(e);
+		const target = e.target as HTMLElement;
+		if (
+			collapsed &&
+			e.currentTarget.contains(target) &&
+			!target.closest('a, button, input, select, textarea, [role="button"], [role="menuitem"]')
+		)
+			onCollapsedChange(false);
+	};
 
 	return (
 		<aside
 			className={cn(
 				'flex h-full shrink-0 flex-col overflow-hidden border-card-border bg-background transition-[width] duration-300 md:border-r',
-				collapsed ? 'w-0 md:w-14' : 'w-full md:w-64',
-				className
+				collapsed ? 'w-0 cursor-e-resize md:w-14' : 'w-full md:w-64',
+				props.className
 			)}
 			{...props}
+			onClick={expandOnClick}
 		>
 			<div className='flex flex-col gap-2 p-2'>
-				<div className='flex justify-end md:hidden'>
+				<div className='flex justify-between'>
+					<Text typography='h2' className={collapsed ? 'hidden' : ''}>
+						STOCKO
+					</Text>
 					<IconButton
-						icon='x'
+						icon='panel-left'
+						variant='ghost'
+						size='sm'
+						aria-label='Alternar menu'
+						onClick={onMenuClick}
+					/>
+					<IconButton
+						className='md:hidden'
+						icon='panel-left-close'
 						variant='ghost'
 						size='sm'
 						aria-label='Fechar menu'

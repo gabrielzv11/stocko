@@ -9,9 +9,13 @@ function Layout() {
 
 	return (
 		<div className='flex h-dvh overflow-hidden'>
-			<Sidebar collapsed={collapsed} onCollapsedChange={setCollapsed} />
+			<Sidebar
+				collapsed={collapsed}
+				onCollapsedChange={setCollapsed}
+				onMenuClick={() => setCollapsed((c) => !c)}
+			/>
 			<div className='flex min-w-full flex-1 flex-col overflow-hidden md:min-w-0'>
-				<Header onMenuClick={() => setCollapsed((c) => !c)} />
+				<Header />
 				<main className='min-h-0 flex-1 overflow-auto'>
 					<Outlet />
 				</main>
