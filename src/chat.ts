@@ -17,6 +17,7 @@ import { env } from './env';
 import type { Prisma } from './generated/prisma/client';
 import { refreshStale } from './repos';
 import { workspaceLlm } from './settings';
+import { summarize, unsummarized } from './summary';
 
 const MAX_STEPS = 25;
 const MAX_TITLE = 80;
@@ -130,6 +131,8 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 		include: { projects: { select: { id: true } }, messages: { orderBy: { createdAt: 'asc' } } },
 	});
 	const history = conversation.messages.map((m) => ({ id: m.id, role: m.role, parts: m.parts }) as UIMessage);
+	// What's before summarizedUntilMessageId reaches the model only through the summary.
+	const recent = unsummarized(history, conversation.summarizedUntilMessageId);
 
 	// Workspace filter (anti-IDOR). No project selected → every project in the workspace.
 	const projects = await db.project.findMany({
@@ -179,10 +182,14 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 					].join('\n')
 				: '',
 			linked.length ? `Já vinculados a esta conversa: ${linked.join(', ')}` : '',
+			// Last: the parts above stay stable across turns (prompt cache).
+			conversation.summary
+				? `Resumo do início desta conversa (as mensagens mais recentes vêm completas):\n<conversation_summary>\n${conversation.summary}\n</conversation_summary>`
+				: '',
 		]
 			.filter(Boolean)
 			.join('\n\n'),
-		messages: await convertToModelMessages(history),
+		messages: await convertToModelMessages(recent),
 		tools: {
 			...agentTools(repos.map((r) => ({ id: r.id, fullName: r.fullName }))),
 			...(apis.length ? apiTools(apis, { workspaceId, userId: c.var.userId, conversationId: id }) : {}),
@@ -218,6 +225,11 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 					},
 				},
 			});
+			// Context of the last step (history + this turn's tool outputs) past the threshold → fold the older turns.
+			const lastStep = await Promise.resolve(result.steps)
+				.then((s) => s.at(-1))
+				.catch(() => undefined);
+			if ((lastStep?.usage.inputTokens ?? 0) > env.CONTEXT_SUMMARY_TOKENS) void summarize(id, llm.languageModel);
 		},
 	});
 });

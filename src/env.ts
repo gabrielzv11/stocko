@@ -23,6 +23,8 @@ const schema = z.object({
 	LLM_MODEL: z.string().default('anthropic/claude-sonnet-5.5'),
 	// Teto de gasto (USD) por workspace nas últimas 24h; só conta o custo reportado pelo OpenRouter (chave do servidor).
 	MAX_DAILY_COST_USD: z.coerce.number().positive().default(5),
+	// Contexto (tokens de entrada do último passo do turno) acima disto → turnos antigos viram resumo. ~60% da janela do modelo.
+	CONTEXT_SUMMARY_TOKENS: z.coerce.number().positive().default(100_000),
 	// Mangaba Router (OpenAI-compatible). Key is per workspace (Settings), so only the base URL lives here.
 	MANGABA_BASE_URL: z
 		.url()
