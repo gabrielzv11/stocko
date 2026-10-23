@@ -121,6 +121,18 @@ export function buildUrl(baseUrl: string, path: string, query: Record<string, st
 	return url;
 }
 
+/** Body as text, reading only until it passes `max` bytes: a huge (or endless) response can't fill memory. */
+export async function readCapped(res: Response, max: number) {
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	// Leaving the for-await cancels the stream.
+	for await (const chunk of res.body ?? []) {
+		chunks.push(chunk);
+		if ((size += chunk.length) > max) break;
+	}
+	return Buffer.concat(chunks).toString('utf8');
+}
+
 // ---------- tools ----------
 
 type Api = { id: string; title: string; baseUrl: string | null };
@@ -191,7 +203,7 @@ export function apiTools(apis: Api[]) {
 				}
 				// redirect: 'manual' — a 3xx to an internal host would bypass the SSRF check.
 				const res = await fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
-				const body = await res.text();
+				const body = await readCapped(res, MAX_BYTES);
 				const text = `GET ${url.pathname}${url.search} → ${res.status}\n${body}`;
 				return text.length > MAX_BYTES ? text.slice(0, MAX_BYTES) + TRUNCATED : text;
 			}),
