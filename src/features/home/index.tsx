@@ -102,7 +102,14 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 		transport,
 		// Título, ordem e projetos vinculados mudam a cada turno.
 		onFinish: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
-		onError: () => toast.error('Não foi possível obter a resposta.'),
+		// O AI SDK põe o corpo da resposta em e.message; erros do servidor vêm como { error, message }.
+		onError: (e) => {
+			let message: string | undefined;
+			try {
+				message = JSON.parse(e.message).message;
+			} catch {}
+			toast.error(message ?? 'Não foi possível obter a resposta.');
+		},
 	});
 	const typing = chat.status === 'submitted' || chat.status === 'streaming';
 	const messages: Message[] = chat.messages

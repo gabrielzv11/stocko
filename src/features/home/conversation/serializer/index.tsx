@@ -1,6 +1,7 @@
 import { CopyButton } from '@/components/ui/copyButton';
 import { Icon } from '@/components/ui/icons';
 import { motion } from 'motion/react';
+import { Fragment } from 'react';
 import { MermaidDiagram } from './mermaid';
 import { parseBlocks, type Block, type Inline } from './parse';
 
@@ -34,12 +35,20 @@ function Inlines({ nodes, streaming }: { nodes: Inline[]; streaming?: boolean })
 						<Inlines nodes={node.children} streaming={streaming} />
 					</em>
 				);
-			case 'link':
+			case 'link': {
+				// Destino visível sem hover: um link montado por prompt injection pode levar dados da conversa na URL.
+				const host = URL.canParse(node.href) ? new URL(node.href).host : node.href;
+				const [only] = node.children;
+				const showsHost = node.children.length === 1 && only.type === 'text' && only.text.includes(host);
 				return (
-					<a key={i} href={node.href} target='_blank' rel='noreferrer' className='underline underline-offset-2'>
-						<Inlines nodes={node.children} streaming={streaming} />
-					</a>
+					<Fragment key={i}>
+						<a href={node.href} target='_blank' rel='noreferrer' title={node.href} className='underline underline-offset-2'>
+							<Inlines nodes={node.children} streaming={streaming} />
+						</a>
+						{!showsHost && <span className='text-muted-foreground ml-1 text-[0.8em]'>({host})</span>}
+					</Fragment>
 				);
+			}
 			case 'code':
 				return (
 					<code key={i} className='bg-muted rounded-md px-1.5 py-0.5 font-mono text-[0.85em]'>
