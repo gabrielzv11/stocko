@@ -16,11 +16,15 @@ const schema = z.object({
 		.transform((s) => s.replace(/\\n/g, '\n'))
 		// Fingerprint (SHA256:...) in place of the .pem only fails on the first GitHub call; fail at boot instead.
 		.refine((s) => s.includes('PRIVATE KEY-----'), 'expected .pem content, not the key fingerprint'),
+	// GitHub App → Webhook secret. Unset = /webhooks/github off (repos re-sync by age on each chat).
+	GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
 	// OpenRouter (openrouter.ai/keys). Model is any OpenRouter slug; avoid `:free` with client code.
 	OPENROUTER_API_KEY: z.string().min(1),
 	LLM_MODEL: z.string().default('anthropic/claude-sonnet-5.5'),
 	// Teto de gasto (USD) por workspace nas últimas 24h; só conta o custo reportado pelo OpenRouter (chave do servidor).
 	MAX_DAILY_COST_USD: z.coerce.number().positive().default(5),
+	// Contexto (tokens de entrada do último passo do turno) acima disto → turnos antigos viram resumo. ~60% da janela do modelo.
+	CONTEXT_SUMMARY_TOKENS: z.coerce.number().positive().default(100_000),
 	// Mangaba Router (OpenAI-compatible). Key is per workspace (Settings), so only the base URL lives here.
 	MANGABA_BASE_URL: z
 		.url()

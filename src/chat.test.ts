@@ -47,3 +47,82 @@ test('chat: 400 on an oversized question, 429 over the 24h spend cap and the per
 		await db.user.delete({ where: { id: user.id } });
 	}
 });
+
+test('feedback: only on assistant messages of the own workspace; comes back as metadata', async () => {
+	const user = await db.user.create({
+		data: { name: 'test', memberships: { create: { workspace: { create: { name: 'test' } } } } },
+		include: { memberships: true },
+	});
+	const workspaceId = user.memberships[0]!.workspaceId;
+	const other = await db.workspace.create({ data: { name: 'other' } });
+	const token = crypto.randomUUID();
+	await db.session.create({ data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
+	const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+	const rate = async (id: string, value: 1 | -1 | null) =>
+		(await chat.request(`/messages/${id}/feedback`, { method: 'PUT', headers, body: JSON.stringify({ value }) })).status;
+
+	try {
+		const conversation = await db.conversation.create({ data: { workspaceId } });
+		const question = await db.message.create({ data: { conversationId: conversation.id, role: 'user', parts: [] } });
+		const answer = await db.message.create({ data: { conversationId: conversation.id, role: 'assistant', parts: [] } });
+		const foreign = await db.conversation.create({ data: { workspaceId: other.id, messages: { create: { role: 'assistant', parts: [] } } }, include: { messages: true } });
+
+		expect(await rate(answer.id, 1)).toBe(204);
+		expect(await rate(question.id, 1)).toBe(404);
+		expect(await rate(foreign.messages[0]!.id, -1)).toBe(404);
+		expect((await db.message.findUniqueOrThrow({ where: { id: foreign.messages[0]!.id } })).feedback).toBeNull();
+
+		const res = await chat.request(`/conversations/${conversation.id}`, { headers });
+		const { messages } = (await res.json()) as { messages: { id: string; metadata: { feedback: number | null } }[] };
+		expect(messages.find((m) => m.id === answer.id)?.metadata.feedback).toBe(1);
+	} finally {
+		await db.workspace.deleteMany({ where: { id: { in: [workspaceId, other.id] } } });
+		await db.user.delete({ where: { id: user.id } });
+	}
+});
+
+test('share: token per conversation of the own workspace; public view has only text parts; revoke kills it', async () => {
+	const user = await db.user.create({
+		data: { name: 'test', memberships: { create: { workspace: { create: { name: 'test' } } } } },
+		include: { memberships: true },
+	});
+	const workspaceId = user.memberships[0]!.workspaceId;
+	const other = await db.workspace.create({ data: { name: 'other' } });
+	const token = crypto.randomUUID();
+	await db.session.create({ data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
+	const call = (path: string, method = 'GET') => chat.request(path, { method, headers: { Authorization: `Bearer ${token}` } });
+
+	try {
+		const conversation = await db.conversation.create({
+			data: {
+				workspaceId,
+				title: 'Login',
+				messages: {
+					create: [
+						{ role: 'user', parts: [{ type: 'text', text: 'onde fica o login?' }] },
+						{ role: 'assistant', parts: [{ type: 'tool-read_file', output: 'SEGREDO do arquivo inteiro' }, { type: 'text', text: 'em `a/b/c.ts#L1@abc1234`' }] },
+					],
+				},
+			},
+		});
+		const foreign = await db.conversation.create({ data: { workspaceId: other.id } });
+		expect((await call(`/conversations/${foreign.id}/share`, 'POST')).status).toBe(404);
+
+		const { token: share } = (await (await call(`/conversations/${conversation.id}/share`, 'POST')).json()) as { token: string };
+		expect(share.length).toBeGreaterThanOrEqual(40);
+		// Idempotent: same link.
+		expect(((await (await call(`/conversations/${conversation.id}/share`, 'POST')).json()) as { token: string }).token).toBe(share);
+
+		const res = await chat.request(`/shared/${share}`);
+		const body = await res.text();
+		expect(res.status).toBe(200);
+		expect(body).not.toContain('SEGREDO');
+		expect(JSON.parse(body)).toMatchObject({ title: 'Login', messages: [{ role: 'user' }, { role: 'assistant', parts: [{ type: 'text', text: 'em `a/b/c.ts#L1@abc1234`' }] }] });
+
+		expect((await call(`/conversations/${conversation.id}/share`, 'DELETE')).status).toBe(204);
+		expect((await chat.request(`/shared/${share}`)).status).toBe(404);
+	} finally {
+		await db.workspace.deleteMany({ where: { id: { in: [workspaceId, other.id] } } });
+		await db.user.delete({ where: { id: user.id } });
+	}
+});
