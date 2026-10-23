@@ -4,8 +4,12 @@ import { DragOverlay, useDndContext, useDraggable, useDroppable } from '@dnd-kit
 
 export type Side = 'left' | 'right';
 export type Pin = { id: string; side: Side; slot: number; range: Range; content: DocumentFragment };
-export type Selected = { range: Range; x: number; y: number };
+/** `block`: diagrama/código/tabela selecionado inteiro por clique. */
+export type Selected = { range: Range; text: string; x: number; y: number; block?: HTMLElement };
 export type SlotData = { side: Side; slot: number };
+
+/** Id do arraste vindo do menu de seleção; os demais são ids de pins. */
+const SELECTION = 'selection';
 
 // Coluna da conversa é max-w-3xl (48rem): as laterais começam a 24rem do centro.
 const GUTTER: Record<Side, string> = { left: 'right-[calc(50%+25rem)]', right: 'left-[calc(50%+25rem)]' };
@@ -25,7 +29,7 @@ function SelectionMenu({
 	onPin?: () => void;
 	ref: React.Ref<HTMLDivElement>;
 }) {
-	const { setNodeRef, attributes, listeners } = useDraggable({ id: 'selection', disabled: !onPin });
+	const { setNodeRef, attributes, listeners } = useDraggable({ id: SELECTION, disabled: !onPin });
 
 	return (
 		<div
@@ -80,6 +84,52 @@ function EmptySlot({ side, slot, dragging }: SlotData & { dragging: boolean }) {
 	);
 }
 
+// Arrastável para outro espaço; recebe outro pin (troca de lugar), não uma seleção nova.
+function PinSlot({ pin, onRemove }: { pin: Pin; onRemove: () => void }) {
+	const { active } = useDndContext();
+	const { setNodeRef: dropRef, isOver } = useDroppable({
+		id: pin.side + pin.slot,
+		data: { side: pin.side, slot: pin.slot } satisfies SlotData,
+		disabled: active?.id === SELECTION,
+	});
+	const { setNodeRef, attributes, listeners, isDragging } = useDraggable({ id: pin.id });
+
+	return (
+		// container-type size: o fade (em cqh) só cobre o trecho que passa da altura do espaço.
+		<div
+			ref={dropRef}
+			className={cn(
+				'group [container-type:size] pointer-events-auto relative min-h-0 flex-1 rounded-2xl transition-colors',
+				isOver && 'bg-foreground/5',
+				isDragging && 'opacity-30',
+			)}
+		>
+			<button
+				ref={setNodeRef}
+				type='button'
+				title='Clique para ir ao trecho; arraste para mudar de lugar'
+				onClick={() => jump(pin.range)}
+				{...attributes}
+				{...listeners}
+				className='text-muted-foreground hover:text-foreground block max-h-full w-full cursor-pointer touch-none overflow-hidden [mask-image:linear-gradient(black_calc(100cqh-3rem),transparent_100cqh)] text-left text-xs transition-colors [&_*]:text-[length:inherit]'
+			>
+				<Fragment content={pin.content} />
+			</button>
+			<button
+				type='button'
+				aria-label='Desafixar'
+				onClick={onRemove}
+				className={cn(
+					'text-muted-foreground hover:text-foreground absolute top-0 cursor-pointer rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
+					pin.side === 'right' ? '-right-5' : '-left-5',
+				)}
+			>
+				<Icon icon='x' size='xs' />
+			</button>
+		</div>
+	);
+}
+
 // Fora da área rolável: ficam parados enquanto o conteúdo rola. Espaços vazios só aparecem durante o arraste.
 function Gutters({
 	pins,
@@ -89,11 +139,12 @@ function Gutters({
 }: {
 	pins: Pin[];
 	slots: number[];
-	/** Trecho sendo arrastado. */
+	/** Seleção sendo arrastada do menu. */
 	preview?: DocumentFragment;
 	onRemove: (id: string) => void;
 }) {
-	const dragging = !!useDndContext().active;
+	const { active } = useDndContext();
+	const dragged = active?.id === SELECTION ? preview : pins.find((p) => p.id === active?.id)?.content;
 
 	return (
 		<>
@@ -107,39 +158,20 @@ function Gutters({
 				>
 					{slots.map((slot) => {
 						const pin = pins.find((p) => p.side === side && p.slot === slot);
-						if (!pin) return <EmptySlot key={slot} side={side} slot={slot} dragging={dragging} />;
-						return (
-							// container-type size: o fade (em cqh) só cobre o trecho que passa da altura do espaço.
-							<div key={slot} className='group [container-type:size] pointer-events-auto relative min-h-0 flex-1'>
-								<button
-									type='button'
-									onClick={() => jump(pin.range)}
-									className='text-muted-foreground hover:text-foreground block max-h-full w-full cursor-pointer overflow-hidden [mask-image:linear-gradient(black_calc(100cqh-3rem),transparent_100cqh)] text-left text-xs transition-colors [&_*]:text-[length:inherit]'
-								>
-									<Fragment content={pin.content} />
-								</button>
-								<button
-									type='button'
-									aria-label='Desafixar'
-									onClick={() => onRemove(pin.id)}
-									className={cn(
-										'text-muted-foreground hover:text-foreground absolute top-0 cursor-pointer rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100',
-										side === 'right' ? '-right-5' : '-left-5',
-									)}
-								>
-									<Icon icon='x' size='xs' />
-								</button>
-							</div>
+						return pin ? (
+							<PinSlot key={slot} pin={pin} onRemove={() => onRemove(pin.id)} />
+						) : (
+							<EmptySlot key={slot} side={side} slot={slot} dragging={!!active} />
 						);
 					})}
 				</div>
 			))}
 
-			{/* Sem animação de volta: o menu (origem) some no drop. */}
+			{/* Sem animação de volta: a origem muda de lugar (ou some) no drop. */}
 			<DragOverlay dropAnimation={null}>
-				{dragging && preview && (
+				{dragged && (
 					<div className='bg-popover text-muted-foreground ring-foreground/10 max-h-32 w-64 cursor-grabbing overflow-hidden rounded-lg [mask-image:linear-gradient(black_5rem,transparent_8rem)] p-3 text-xs shadow-md ring-1 [&_*]:text-[length:inherit]'>
-						<Fragment content={preview} />
+						<Fragment content={dragged} />
 					</div>
 				)}
 			</DragOverlay>

@@ -53,6 +53,14 @@ function toBlocks(parts: Part[]) {
 	return blocks;
 }
 
+/** Cópia do trecho para pins e preview, sem botões (copiar, zoom) nem o contorno de seleção. */
+function clone(range: Range) {
+	const content = range.cloneContents();
+	content.querySelectorAll('button').forEach((b) => b.remove());
+	content.querySelectorAll('[data-selected]').forEach((el) => el.removeAttribute('data-selected'));
+	return content;
+}
+
 /** Blocos fixados por lateral: cada um ocupa uma faixa fixa, sem sobrepor. */
 const SLOTS = [0, 1, 2];
 
@@ -135,7 +143,8 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 	const menuRef = useRef<HTMLDivElement>(null);
 	const [selected, setSelected] = useState<Selected | null>(null);
 	const [pins, setPins] = useState<Pin[]>([]);
-	const preview = useMemo(() => selected?.range.cloneContents(), [selected]);
+	const preview = useMemo(() => (selected ? clone(selected.range) : undefined), [selected]);
+	const down = useRef({ x: 0, y: 0 });
 	// Distância mínima: clique em "Fixar" sem arrastar continua sendo clique.
 	const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 	const last = messages.at(-1);
@@ -158,15 +167,36 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 		return () => document.removeEventListener('pointerdown', close);
 	}, [selected]);
 
+	// Contorno no bloco selecionado por clique (não há seleção nativa para mostrar).
+	useEffect(() => {
+		const block = selected?.block;
+		block?.toggleAttribute('data-selected', true);
+		return () => void block?.toggleAttribute('data-selected', false);
+	}, [selected]);
+
 	function select(e: React.PointerEvent) {
-		if (menuRef.current?.contains(e.target as Node)) return;
+		const target = e.target as Element;
+		if (menuRef.current?.contains(target)) return;
 		const sel = getSelection();
-		if (!sel?.rangeCount || !sel.toString().trim()) return setSelected(null);
-		const range = sel.getRangeAt(0).cloneRange();
+		let range: Range;
+		let text: string;
+		let block: HTMLElement | undefined;
+		if (sel?.rangeCount && sel.toString().trim()) {
+			range = sel.getRangeAt(0).cloneRange();
+			text = sel.toString().trim();
+		} else {
+			// Clique sem arrastar (arrastar é pan no diagrama) em diagrama, código ou tabela seleciona o bloco inteiro.
+			block = target.closest<HTMLElement>('[data-block]') ?? undefined;
+			const moved = Math.hypot(e.clientX - down.current.x, e.clientY - down.current.y) > 5;
+			if (!block || moved || target.closest('button, a')) return setSelected(null);
+			range = document.createRange();
+			range.selectNode(block);
+			text = block.dataset.block || block.innerText;
+		}
 		const rect = range.getBoundingClientRect();
 		const column = columnRef.current!.getBoundingClientRect();
 		// Relativo à coluna, que rola junto: o menu acompanha o trecho.
-		setSelected({ range, x: rect.left + rect.width / 2 - column.left, y: rect.top - column.top });
+		setSelected({ range, text, block, x: rect.left + rect.width / 2 - column.left, y: rect.top - column.top });
 	}
 
 	function done() {
@@ -181,22 +211,38 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 	function pin(side: Side, slot: number) {
 		if (!selected) return;
 		const { range } = selected;
-		setPins((prev) => [...prev, { id: crypto.randomUUID(), side, slot, range, content: range.cloneContents() }]);
+		setPins((prev) => [...prev, { id: crypto.randomUUID(), side, slot, range, content: clone(range) }]);
 		done();
+	}
+
+	// Espaço ocupado: os dois trocam de lugar.
+	function move(id: string, to: SlotData) {
+		setPins((prev) => {
+			const from = prev.find((p) => p.id === id)!;
+			return prev.map((p) =>
+				p.id === id ? { ...p, ...to } : p.side === to.side && p.slot === to.slot ? { ...p, side: from.side, slot: from.slot } : p,
+			);
+		});
 	}
 
 	return (
 		<DndContext
 			sensors={sensors}
 			collisionDetection={pointerWithin}
-			onDragEnd={({ over }) => {
+			onDragEnd={({ active, over }) => {
 				if (!over) return;
-				const { side, slot } = over.data.current as SlotData;
-				pin(side, slot);
+				const to = over.data.current as SlotData;
+				if (pins.some((p) => p.id === active.id)) move(String(active.id), to);
+				// Seleção nova só entra em espaço vazio (os ocupados nem aceitam o drop).
+				else pin(to.side, to.slot);
 			}}
 		>
 			<div className={cn('@container relative flex flex-col', className)} {...props}>
-				<div className='min-h-0 flex-1 overflow-y-auto' onPointerUp={select}>
+				<div
+					className='min-h-0 flex-1 overflow-y-auto'
+					onPointerDown={(e) => (down.current = { x: e.clientX, y: e.clientY })}
+					onPointerUp={select}
+				>
 					<div ref={columnRef} className='relative mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6'>
 						{messages.map((message) => {
 							if (message.role === 'user') {
@@ -251,7 +297,7 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 								ref={menuRef}
 								selected={selected}
 								onAsk={() => {
-									onAsk?.(selected.range.toString().trim());
+									onAsk?.(selected.text);
 									done();
 								}}
 								onPin={free && (() => pin(free.side, free.slot))}

@@ -64,6 +64,10 @@ function Inlines({ nodes, streaming }: { nodes: Inline[]; streaming?: boolean })
 	});
 }
 
+// Contorno vem de longe e encaixa no bloco ao selecionar (como os cards do gamesoft-freex).
+const SELECTABLE =
+	'outline-0 outline-offset-[12px] outline-transparent transition-[outline-color,outline-offset,outline-width] duration-150 ease-out data-selected:outline-2 data-selected:outline-offset-2 data-selected:outline-accent';
+
 function BlockView({ block, streaming }: { block: Block; streaming?: boolean }) {
 	switch (block.type) {
 		case 'paragraph':
@@ -102,7 +106,8 @@ function BlockView({ block, streaming }: { block: Block; streaming?: boolean }) 
 				</pre>
 			);
 			return (
-				<div className='border-border bg-card overflow-hidden rounded-xl border'>
+				// data-block: clique seleciona o bloco inteiro (ver Conversation), citando o código-fonte.
+				<div data-block={block.text} className={`border-border bg-card overflow-hidden rounded-xl border ${SELECTABLE}`}>
 					<div className='text-muted-foreground flex items-center justify-between py-1 pr-1 pl-3 text-xs'>
 						{/* <span className='font-mono'>{block.lang || 'código'}</span> */}
 						<div></div>
@@ -115,7 +120,7 @@ function BlockView({ block, streaming }: { block: Block; streaming?: boolean }) 
 		}
 		case 'table':
 			return (
-				<div className='border-border overflow-x-auto rounded-xl border'>
+				<div data-block='' className={`border-border overflow-x-auto rounded-xl border ${SELECTABLE}`}>
 					<table className='w-full text-sm'>
 						<thead className='bg-muted/50'>
 							<tr>
