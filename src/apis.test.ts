@@ -11,7 +11,7 @@ process.env.OPENROUTER_API_KEY ||= 'test';
 const { env } = await import('./env');
 env.SECRETS_KEY ??= Buffer.alloc(32, 7).toString('base64');
 
-const { assertPublicUrl, buildUrl, isPrivateIp, parseSpec, readCapped, seal, searchOperations, unseal } = await import('./apis');
+const { apiTools, assertPublicUrl, buildUrl, isPrivateIp, parseSpec, readCapped, seal, searchOperations, unseal } = await import('./apis');
 
 test('isPrivateIp / assertPublicUrl: block internal targets', async () => {
 	for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.0.1', '169.254.169.254', '100.64.0.1', '::1', 'fd12::1', 'fe80::1', '::ffff:127.0.0.1'])
@@ -59,4 +59,21 @@ test('readCapped: stops an endless body just past the limit', async () => {
 	expect(text.length).toBeLessThanOrEqual(17 * 1024);
 	expect(cancelled).toBe(true);
 	expect(await readCapped(new Response('{"ok":true}'), 16 * 1024)).toBe('{"ok":true}');
+});
+
+test('call_api: audit line for every call, blocked ones included', async () => {
+	const audit = { workspaceId: 'w1', userId: 'u1', conversationId: 'c1' };
+	const tools = apiTools([{ id: 'a1', title: 'Interna', baseUrl: 'http://127.0.0.1:9090' }], audit);
+	const lines: string[] = [];
+	const realInfo = console.info;
+	console.info = (...args: unknown[]) => lines.push(args.join(' '));
+	try {
+		const execute = tools.call_api.execute as unknown as (i: object, o: object) => Promise<string>;
+		const out = await execute({ api: 'a1', path: '/api/v1/query', query: { query: 'up' } }, { toolCallId: 't', messages: [] });
+		expect(out).toContain('rede privada');
+	} finally {
+		console.info = realInfo;
+	}
+	expect(lines).toHaveLength(1);
+	expect(JSON.parse(lines[0]!.replace('[call_api] ', ''))).toMatchObject({ ...audit, api: 'a1', path: '/api/v1/query', error: expect.stringContaining('rede privada') });
 });

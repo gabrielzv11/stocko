@@ -181,7 +181,7 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 		messages: await convertToModelMessages(history),
 		tools: {
 			...agentTools(repos.map((r) => ({ id: r.id, fullName: r.fullName }))),
-			...(apis.length ? apiTools(apis) : {}),
+			...(apis.length ? apiTools(apis, { workspaceId, userId: c.var.userId, conversationId: id }) : {}),
 			link_projects: tool({
 				description: 'Vincula esta conversa a projetos da lista. Só quando a pergunta for claramente sobre eles.',
 				inputSchema: z.object({ projectIds: z.array(z.string()).min(1) }),

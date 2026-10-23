@@ -148,7 +148,7 @@ type Api = { id: string; title: string; baseUrl: string | null };
  * Tools over the project's API specs (already filtered by workspace). Read-only: call_api is GET only,
  * so a prompt injection in code or in an API response can't change anything with the user's credentials.
  */
-export function apiTools(apis: Api[]) {
+export function apiTools(apis: Api[], audit: { workspaceId: string; userId: string; conversationId: string }) {
 	const specs = new Map<string, Promise<{ spec: Spec; authHeader: string | null }>>();
 
 	function find(id: string) {
@@ -198,21 +198,31 @@ export function apiTools(apis: Api[]) {
 				query: z.record(z.string(), z.string()).optional(),
 			}),
 			execute: safe(async ({ api, path, query }) => {
-				const a = find(api);
-				if (!a.baseUrl) throw new Error(`${a.title} não tem baseUrl: só documentação, não dá para chamar.`);
-				const url = buildUrl(a.baseUrl, path, query);
-				await assertPublicUrl(url.href);
-				const { authHeader } = await load(a.id);
-				const headers: Record<string, string> = { Accept: 'application/json' };
-				if (authHeader) {
-					const [name = '', ...value] = unseal(authHeader).split(':');
-					headers[name.trim()] = value.join(':').trim();
+				const started = Date.now();
+				// Audit: one line per call, blocked ones included, in the platform logs (Message.parts can be deleted with the conversation).
+				const log = (outcome: { status: number } | { error: string }) =>
+					console.info('[call_api]', JSON.stringify({ ...audit, api, path, query, ms: Date.now() - started, ...outcome }));
+				try {
+					const a = find(api);
+					if (!a.baseUrl) throw new Error(`${a.title} não tem baseUrl: só documentação, não dá para chamar.`);
+					const url = buildUrl(a.baseUrl, path, query);
+					await assertPublicUrl(url.href);
+					const { authHeader } = await load(a.id);
+					const headers: Record<string, string> = { Accept: 'application/json' };
+					if (authHeader) {
+						const [name = '', ...value] = unseal(authHeader).split(':');
+						headers[name.trim()] = value.join(':').trim();
+					}
+					// redirect: 'manual' — a 3xx to an internal host would bypass the SSRF check.
+					const res = await fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
+					const body = await readCapped(res, MAX_BYTES);
+					log({ status: res.status });
+					const text = `GET ${url.pathname}${url.search} → ${res.status}\n${body}`;
+					return text.length > MAX_BYTES ? text.slice(0, MAX_BYTES) + TRUNCATED : text;
+				} catch (e) {
+					log({ error: (e as Error).message });
+					throw e;
 				}
-				// redirect: 'manual' — a 3xx to an internal host would bypass the SSRF check.
-				const res = await fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
-				const body = await readCapped(res, MAX_BYTES);
-				const text = `GET ${url.pathname}${url.search} → ${res.status}\n${body}`;
-				return text.length > MAX_BYTES ? text.slice(0, MAX_BYTES) + TRUNCATED : text;
 			}),
 		}),
 	};
