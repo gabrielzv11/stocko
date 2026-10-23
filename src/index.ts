@@ -11,6 +11,7 @@ import { resetStuckSyncs } from './repos';
 import { settings } from './settings';
 import { usage } from './usage';
 import { webhooks } from './webhooks';
+import { workspaces } from './workspaces';
 
 await resetStuckSyncs();
 
@@ -37,5 +38,6 @@ app.route('/', chat);
 app.route('/', usage);
 app.route('/', settings);
 app.route('/', webhooks);
+app.route('/', workspaces);
 
 export default { port: env.PORT, fetch: app.fetch };

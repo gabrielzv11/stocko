@@ -39,7 +39,10 @@ model Session {
   userId     String
   expiresAt  DateTime
   createdAt  DateTime @default(now())
+  /// Active workspace (switcher). Null or no longer a member = the user's first workspace.
+  workspaceId String?
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace  Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
   @@index([userId])
 }
@@ -65,6 +68,8 @@ model Workspace {
   mangabaApiKey String?
   createdAt     DateTime       @default(now())
   members       Member[]
+  invites       Invite[]
+  sessions      Session[]
   installations Installation[]
   repositories  Repository[]
   projects      Project[]
@@ -74,12 +79,26 @@ model Workspace {
 model Member {
   workspaceId String
   userId      String
+  /// 'owner' (created the workspace; invites and removes) | 'member' (joined by invite)
   role        String    @default("owner")
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([workspaceId, userId])
   @@index([userId])
+}
+
+/// Pending invite by GitHub login; accepted (and deleted) on that user's next sign-in. Also lets them past ALLOWED_GITHUB_LOGINS.
+model Invite {
+  id          String    @id @default(cuid())
+  workspaceId String
+  /// Lowercase GitHub login.
+  login       String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, login])
+  @@index([login])
 }
 
 // ---------- github ----------

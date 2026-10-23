@@ -7,7 +7,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const SESSION_TTL_MS = 7 * DAY_MS;
 const STATE_TTL_MS = 10 * 60 * 1000;
 
-export type AuthVars = { userId: string; workspaceId: string; tokenHash: string };
+export type AuthVars = { userId: string; workspaceId: string; role: string; tokenHash: string };
 
 const randomToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 export const sha256 = (s: string) => new Bun.CryptoHasher('sha256').update(s).digest('hex');
@@ -20,9 +20,11 @@ export const requireAuth = createMiddleware<{ Variables: AuthVars }>(async (c, n
 	const tokenHash = sha256(token);
 	const session = await db.session.findUnique({
 		where: { tokenHash },
-		include: { user: { include: { memberships: { take: 1 } } } },
+		include: { user: { include: { memberships: { orderBy: { workspace: { createdAt: 'asc' } } } } } },
 	});
-	const membership = session?.user.memberships[0];
+	// Active workspace of the session; removed from it (or none picked) → the first one still theirs.
+	const memberships = session?.user.memberships ?? [];
+	const membership = memberships.find((m) => m.workspaceId === session?.workspaceId) ?? memberships[0];
 	if (!session || session.expiresAt < new Date() || !membership) return c.json({ error: 'unauthorized' }, 401);
 
 	// Sliding TTL; refresh at most once a day to avoid a write per request.
@@ -32,6 +34,7 @@ export const requireAuth = createMiddleware<{ Variables: AuthVars }>(async (c, n
 
 	c.set('userId', session.userId);
 	c.set('workspaceId', membership.workspaceId);
+	c.set('role', membership.role);
 	c.set('tokenHash', tokenHash);
 	await next();
 });
@@ -71,11 +74,16 @@ auth.get('/auth/github/callback', async (c) => {
 	if (!userRes.ok) return fail('github_error');
 	const gh = (await userRes.json()) as { id: number; login: string; name: string | null; avatar_url: string };
 
-	if (!env.ALLOWED_GITHUB_LOGINS.includes(gh.login.toLowerCase())) return fail('forbidden');
-
+	const login = gh.login.toLowerCase();
 	const profile = { name: gh.name ?? gh.login, avatarUrl: gh.avatar_url };
 	const subject = String(gh.id);
 	const identity = await db.identity.findUnique({ where: { provider_subject: { provider: 'github', subject } } });
+	const invites = await db.invite.findMany({ where: { login }, orderBy: { createdAt: 'asc' } });
+	// Allowlist, or vouched for by a workspace: pending invite or still a member of one they were invited to.
+	const invitedMember = identity ? await db.member.count({ where: { userId: identity.userId, role: 'member' } }) : 0;
+	if (!env.ALLOWED_GITHUB_LOGINS.includes(login) && !invites.length && !invitedMember) return fail('forbidden');
+
+	const joined = invites.map((i) => ({ workspaceId: i.workspaceId, role: 'member' }));
 	const userId = identity
 		? (await db.identity.update({ where: { id: identity.id }, data: { login: gh.login, user: { update: profile } } }))
 				.userId
@@ -84,28 +92,35 @@ auth.get('/auth/github/callback', async (c) => {
 					data: {
 						...profile,
 						identities: { create: { provider: 'github', subject, login: gh.login } },
-						// MVP: one workspace per user, created on signup.
-						memberships: { create: { workspace: { create: { name: gh.login } } } },
+						// Invited: joins those workspaces. Otherwise gets their own.
+						memberships: joined.length ? { create: joined } : { create: { workspace: { create: { name: gh.login } } } },
 					},
 				})
 			).id;
+	if (identity && joined.length) await db.member.createMany({ data: joined.map((j) => ({ ...j, userId })), skipDuplicates: true });
+	if (invites.length) await db.invite.deleteMany({ where: { id: { in: invites.map((i) => i.id) } } });
+	// Removed from every workspace they joined, now allowlisted: gets their own instead of a dead session.
+	if (!(await db.member.count({ where: { userId } })))
+		await db.member.create({ data: { user: { connect: { id: userId } }, workspace: { create: { name: gh.login } } } });
 
-	// Links every App installation this GitHub user can access. The installation_id GitHub appends to the
-	// setup URL is spoofable, so the user's own token is the source of truth. Ones owned by another workspace are skipped.
+	// Links every App installation this GitHub user can access to the workspace they own (none when they only joined by invite).
+	// The installation_id GitHub appends to the setup URL is spoofable, so the user's own token is the source of truth.
+	// Ones owned by another workspace are skipped.
 	// ponytail: first 100 installations only; paginate if a user ever has more.
-	const instRes = await fetch('https://api.github.com/user/installations?per_page=100', { headers });
-	if (instRes.ok) {
+	const owned = await db.member.findFirst({ where: { userId, role: 'owner' } });
+	const instRes = owned && (await fetch('https://api.github.com/user/installations?per_page=100', { headers }));
+	if (owned && instRes?.ok) {
 		const { installations } = (await instRes.json()) as { installations: { id: number; account: { login: string } }[] };
-		const { workspaceId } = await db.member.findFirstOrThrow({ where: { userId } });
 		await db.installation.createMany({
-			data: installations.map((i) => ({ workspaceId, githubInstallationId: BigInt(i.id), accountLogin: i.account.login })),
+			data: installations.map((i) => ({ workspaceId: owned.workspaceId, githubInstallationId: BigInt(i.id), accountLogin: i.account.login })),
 			skipDuplicates: true,
 		});
 	}
 
 	const token = randomToken();
 	await db.session.create({
-		data: { tokenHash: sha256(token), userId, expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
+		// Just accepted an invite → lands in that workspace.
+		data: { tokenHash: sha256(token), userId, workspaceId: invites[0]?.workspaceId, expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
 	});
 	// Fragment never reaches servers or logs.
 	return c.redirect(`${env.FRONTEND_URL}/login#token=${token}`);
@@ -124,7 +139,10 @@ auth.get('/me', requireAuth, async (c) => {
 	const [user, installations] = await Promise.all([
 		db.user.findUniqueOrThrow({
 			where: { id: c.var.userId },
-			include: { identities: { where: { provider: 'github' }, take: 1 } },
+			include: {
+				identities: { where: { provider: 'github' }, take: 1 },
+				memberships: { orderBy: { workspace: { createdAt: 'asc' } }, include: { workspace: { select: { name: true } } } },
+			},
 		}),
 		db.installation.count({ where: { workspaceId: c.var.workspaceId } }),
 	]);
@@ -134,6 +152,8 @@ auth.get('/me', requireAuth, async (c) => {
 		avatarUrl: user.avatarUrl,
 		login: user.identities[0]?.login ?? null,
 		workspaceId: c.var.workspaceId,
+		role: c.var.role,
+		workspaces: user.memberships.map((m) => ({ id: m.workspaceId, name: m.workspace.name, role: m.role })),
 		hasInstallation: installations > 0,
 	});
 });
