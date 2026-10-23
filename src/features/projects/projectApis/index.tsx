@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import Dialog from '@/components/ui/dialog';
 import { IconButton } from '@/components/ui/iconButton';
 import { TextField } from '@/components/ui/textField';
 import { api } from '@/lib/api';
@@ -46,45 +47,53 @@ function ProjectApis({ project }: { project: Project }) {
 		<section className='flex flex-col gap-3 px-12 py-4'>
 			<div className='flex items-center justify-between gap-2'>
 				<h3 className='text-lg font-semibold'>APIs</h3>
-				{!adding && (
-					<Button size='sm' onClick={() => setAdding(true)}>
-						Adicionar API
-					</Button>
-				)}
+				<Button size='sm' onClick={() => setAdding(true)}>
+					Adicionar API
+				</Button>
 			</div>
 
-			{adding && (
-				<form onSubmit={handleSubmit} className='flex flex-col gap-3'>
-					<TextField name='title' placeholder='Título (ex.: Prometheus produção)' required autoFocus />
-					<textarea name='description' className={textarea} placeholder='Descrição: o que é esta API' required />
-					<textarea
-						name='usage'
-						className={textarea}
-						placeholder='Forma de uso: quando e como o agente deve consultar (ex.: lentidão → /api/v1/query com histogram_quantile)'
-					/>
-					<TextField name='baseUrl' type='url' placeholder='URL base para chamadas GET (vazio = só documentação)' />
-					<TextField name='authHeader' placeholder='Header de auth (ex.: Authorization: Bearer xxx), salvo criptografado' />
-					<label className='text-muted-foreground flex flex-col gap-1 text-sm'>
-						Spec OpenAPI/Swagger (.json, .yaml)
-						<input type='file' name='specFile' accept='.json,.yaml,.yml' />
-					</label>
-					<textarea name='specText' className={`${textarea} font-mono`} placeholder='...ou cole a spec aqui' />
+			<Dialog open={adding} onClose={() => setAdding(false)} closeButton>
+				<form onSubmit={handleSubmit}>
+					<Dialog.Header>
+						<Dialog.Title>Nova API</Dialog.Title>
+					</Dialog.Header>
 
-					{create.isError && <p className='text-sm text-red-500'>{error}</p>}
+					<Dialog.Body>
+						<div className='flex flex-col gap-3'>
+							<TextField name='title' placeholder='Título (ex.: Prometheus produção)' required autoFocus />
+							<textarea name='description' className={textarea} placeholder='Descrição: o que é esta API' required />
+							<textarea
+								name='usage'
+								className={textarea}
+								placeholder='Forma de uso: quando e como o agente deve consultar (ex.: lentidão → /api/v1/query com histogram_quantile)'
+							/>
+							<TextField name='baseUrl' type='url' placeholder='URL base para chamadas GET (vazio = só documentação)' />
+							<TextField name='authHeader' placeholder='Header de auth (ex.: Authorization: Bearer xxx), salvo criptografado' />
+							<label className='text-muted-foreground flex flex-col gap-1 text-sm'>
+								Spec OpenAPI/Swagger (.json, .yaml)
+								<input type='file' name='specFile' accept='.json,.yaml,.yml' />
+							</label>
+							<textarea name='specText' className={`${textarea} font-mono`} placeholder='...ou cole a spec aqui' />
 
-					<div className='flex gap-2'>
-						<Button type='submit' size='sm' loading={create.isPending}>
-							Salvar
-						</Button>
-						<Button variant='secondary' size='sm' onClick={() => setAdding(false)}>
-							Cancelar
-						</Button>
-					</div>
+							{create.isError && <p className='text-sm text-red-500'>{error}</p>}
+						</div>
+					</Dialog.Body>
+
+					<Dialog.Footer>
+						<div className='flex gap-2'>
+							<Button variant='secondary' size='sm' onClick={() => setAdding(false)}>
+								Cancelar
+							</Button>
+							<Button type='submit' size='sm' loading={create.isPending}>
+								Salvar
+							</Button>
+						</div>
+					</Dialog.Footer>
 				</form>
-			)}
+			</Dialog>
 
 			{isPending && <p className='text-muted-foreground text-sm'>Carregando APIs...</p>}
-			{!isPending && !apis.length && !adding && (
+			{!isPending && !apis.length && (
 				<p className='text-muted-foreground text-sm'>Nenhuma API. Adicione specs de serviços ou do monitoramento.</p>
 			)}
 			{apis.map((a) => (
