@@ -2,6 +2,7 @@ import { IconButton } from '@/components/ui/iconButton';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useProjects } from '../api';
 import { ProjectApis } from '../projectApis';
+import { ProjectRepos } from '../projectRepos';
 
 export default function ProjectPage() {
 	const { id } = useParams();
@@ -25,6 +26,7 @@ export default function ProjectPage() {
 				</div>
 			</div>
 
+			{project && <ProjectRepos project={project} />}
 			{project && <ProjectApis project={project} />}
 		</main>
 	);
