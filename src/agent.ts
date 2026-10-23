@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { readdir } from 'node:fs/promises';
 import { z } from 'zod';
 import { db } from './db';
+import { installationOctokit } from './client';
 import { env } from './env';
 import { git, repoDir, run, waitForSync, zoektDir } from './repos';
 
@@ -12,6 +13,8 @@ const MAX_GREP_BYTES = 16 * 1024;
 const MAX_READ_LINES = 300;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const GREP_TIMEOUT_MS = 10_000;
+const MAX_COMMITS = 30;
+const MAX_DIFF_BYTES = 16 * 1024;
 
 /** Glob → anchored regex, same semantics as git's :(glob) pathspec. No "/" → any depth, like ripgrep's --glob. */
 export function globToRegex(glob: string) {
@@ -77,10 +80,23 @@ export function agentTools(repos: Repo[]) {
 	// SHA fixed on first use, for the whole turn: every tool and citation sees the same tree, even if a sync lands mid-turn.
 	const pinned = new Map<string, string>();
 
-	/** Looks up the repo and its synced SHA; waits only when the first sync is still running. */
-	async function open(fullName: string) {
+	function find(fullName: string) {
 		const repo = repos.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
 		if (!repo) throw new Error(`repo desconhecido: ${fullName}. Use list_repos.`);
+		return repo;
+	}
+
+	/** Octokit for the repo's installation: the shallow clone has no history, GitHub has. */
+	async function github(fullName: string) {
+		const { id, fullName: name } = find(fullName);
+		const { installation } = await db.repository.findUniqueOrThrow({ where: { id }, include: { installation: true } });
+		const [owner = '', repo = ''] = name.split('/');
+		return { octokit: installationOctokit(Number(installation.githubInstallationId)), owner, repo };
+	}
+
+	/** Looks up the repo and its synced SHA; waits only when the first sync is still running. */
+	async function open(fullName: string) {
+		const repo = find(fullName);
 		if (!pinned.has(repo.id)) {
 			// Any status: during a re-sync (or after a failed one) the last synced SHA is still in the bare repo.
 			const synced = () =>
@@ -177,6 +193,49 @@ export function agentTools(repos: Repo[]) {
 					.join('\n');
 				const more = last < lines.length ? `\n[linhas ${start}-${last} de ${lines.length}; peça start=${last + 1}]` : '';
 				return `${repo}/${p}@${sha.slice(0, 7)}\n${body}${more}`;
+			}),
+		}),
+
+		list_commits: tool({
+			description: `Histórico de commits (API do GitHub), mais recentes primeiro: sha, data, autor e mensagem. Filtra por path e por período. Máx. ${MAX_COMMITS}.`,
+			inputSchema: z.object({
+				repo: z.string().describe('owner/name'),
+				path: z.string().optional().describe('arquivo ou diretório'),
+				ref: z.string().optional().describe('branch ou sha; padrão: o SHA que as outras tools leem'),
+				since: z.string().optional().describe('ISO 8601, ex.: 2026-10-01T00:00:00Z'),
+				until: z.string().optional().describe('ISO 8601'),
+			}),
+			execute: safe(async ({ repo, path: p, ref, since, until }) => {
+				const { octokit, owner, repo: name } = await github(repo);
+				const sha = ref ?? (await open(repo)).sha;
+				const { data } = await octokit.rest.repos.listCommits({ owner, repo: name, sha, path: p, since, until, per_page: MAX_COMMITS });
+				const line = (c: (typeof data)[number]) =>
+					`${c.sha.slice(0, 7)} ${c.commit.author?.date?.slice(0, 10) ?? '?'} ${c.author?.login ?? c.commit.author?.name ?? '?'} — ${c.commit.message.split('\n')[0]}`;
+				return data.map(line).join('\n') || 'nenhum commit';
+			}),
+		}),
+
+		diff_refs: tool({
+			description:
+				'Diferença entre dois refs (branch, tag ou sha) via API do GitHub: commits de base até head, arquivos alterados e patches. Com list_commits responde "o que mudou desde X". path filtra arquivos pelo prefixo.',
+			inputSchema: z.object({
+				repo: z.string().describe('owner/name'),
+				base: z.string(),
+				head: z.string(),
+				path: z.string().optional(),
+			}),
+			execute: safe(async ({ repo, base, head, path: p }) => {
+				const { octokit, owner, repo: name } = await github(repo);
+				const { data } = await octokit.rest.repos.compareCommitsWithBasehead({ owner, repo: name, basehead: `${base}...${head}`, per_page: 100 });
+				const files = (data.files ?? []).filter((f) => !p || f.filename.startsWith(p));
+				const text = [
+					`${base}...${head}: ${data.status}, ${data.ahead_by} commit(s) à frente, ${data.behind_by} atrás`,
+					...data.commits.slice(-MAX_COMMITS).map((c) => `${c.sha.slice(0, 7)} ${c.commit.message.split('\n')[0]}`),
+					'',
+					...files.map((f) => `${f.status} ${f.filename} +${f.additions} -${f.deletions}`),
+					...files.flatMap((f) => (f.patch ? ['', `--- ${f.filename}`, f.patch] : [])),
+				].join('\n');
+				return text.length > MAX_DIFF_BYTES ? text.slice(0, MAX_DIFF_BYTES) + TRUNCATED : text;
 			}),
 		}),
 	};
