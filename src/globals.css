@@ -4,6 +4,20 @@
 
 @import 'tailwindcss';
 
+/* Safelist de cores primary, info, destructive */
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}primary');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}primary-foreground');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}info');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}info-foreground');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}destructive');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}success');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}warning');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}primary/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}info/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}destructive/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}success/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}warning/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+
 :root {
 	/* base */
 	--primary: oklch(100% 0.00011 271.152);
@@ -24,6 +38,12 @@
 
 	--popover: oklch(29.313% 0.00003 271.152);
 	--popover-foreground: oklch(0.985 0.002 247.839);
+
+	--destructive: oklch(64.501% 0.21541 16.421);
+	--warning: oklch(70.485% 0.18669 47.592);
+	--success: oklch(77.296% 0.15348 163.254);
+	--info: oklch(0.141 0.005 285.823);
+	--info-foreground: oklch(100% 0.00011 271.152);
 
 	/* shadcn compat */
 	--input: oklch(29.82% 0.00143 15.934);
@@ -52,6 +72,12 @@
 	--color-input-foreground: var(--input-foreground);
 	--color-accent: var(--accent);
 	--color-accent-foreground: var(--accent-foreground);
+
+	--color-destructive: var(--destructive);
+	--color-warning: var(--warning);
+	--color-success: var(--success);
+	--color-info: var(--info);
+	--color-info-foreground: var(--info-foreground);
 
 	--font-body: var(--font-sen), ui-sans-serif, system-ui, sans-serif;
 	--font-display: var(--font-playfair), ui-serif, Georgia, serif;

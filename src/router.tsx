@@ -8,6 +8,7 @@ import Login from './features/login';
 import Projects from './features/projects';
 import ProjectPage from './features/projects/projectPage';
 import Settings from './features/settings';
+import SharedConversation from './features/shared';
 import Usage from './features/usage';
 import { getToken } from './lib/auth';
 
@@ -34,6 +35,8 @@ function Router() {
 	return (
 		<Routes>
 			<Route path='login' element={<Login />} />
+			{/* Link público: fora do RequireAuth. */}
+			<Route path='s/:token' element={<SharedConversation />} />
 			<Route element={<RequireAuth />}>
 				<Route index element={<NewConversation />} />
 				<Route path='c/:id' element={<ConversationPage />} />

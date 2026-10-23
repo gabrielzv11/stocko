@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { unsentIds, useConversationMessages } from './api';
 import { Conversation, type Message, type Part } from './conversation';
 import { Projects } from './projects';
+import { ShareButton } from './share';
 
 const transport = new DefaultChatTransport({
 	api: `${import.meta.env.VITE_API_URL}/conversations`,
@@ -31,10 +32,14 @@ type ToolInput = {
 	path?: string;
 	start?: number;
 	end?: number;
+	ref?: string;
+	base?: string;
+	head?: string;
+	query?: string;
 };
 
 function stepLabel(name: string, input: ToolInput = {}) {
-	const repo = input.repo ? ` em ${input.repo}` : '';
+	const repo = input.repo ? ` em ${input.repo}${input.ref ? `@${input.ref}` : ''}` : '';
 	switch (name) {
 		case 'list_repos':
 			return 'Listando repositórios';
@@ -46,6 +51,14 @@ function stepLabel(name: string, input: ToolInput = {}) {
 			return `Buscando "${input.regex ?? ''}"${input.glob ? ` (${input.glob})` : ''}${repo}`;
 		case 'read_file':
 			return `Lendo ${input.path ?? 'arquivo'}${input.start ? ` (linhas ${input.start}–${input.end ?? '…'})` : ''}${repo}`;
+		case 'list_commits':
+			return `Lendo o histórico${input.path ? ` de ${input.path}` : ''}${repo}`;
+		case 'diff_refs':
+			return `Comparando ${input.base ?? '…'}...${input.head ?? '…'}${repo}`;
+		case 'search_docs':
+			return `Buscando "${input.query ?? ''}" nos docs e no Jira`;
+		case 'read_doc':
+			return 'Lendo doc';
 		default:
 			return name;
 	}
@@ -120,6 +133,8 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 				role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
 				parts: toParts(m, streaming),
 				streaming,
+				// GET /conversations/:id põe o 👍/👎 salvo em metadata.
+				feedback: (m.metadata as { feedback?: 1 | -1 | null } | undefined)?.feedback,
 			};
 		})
 		// Assistente ainda sem nada: some, e o "digitando" continua visível.
@@ -147,6 +162,11 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 				</div>
 			) : (
 				<Conversation messages={messages} typing={typing} onAsk={setQuote} className='min-h-0 flex-1' />
+			)}
+			{!empty && (
+				<div className='absolute top-3 right-4 z-10'>
+					<ShareButton conversationId={id} />
+				</div>
 			)}
 
 			{/* Com conversa, flutua sobre ela (relativo ao container, não à tela); vazio, fica no fluxo para centralizar. */}

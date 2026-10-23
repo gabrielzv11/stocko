@@ -3,23 +3,16 @@ import {
 	DropdownMenuContent,
 	DropdownMenuGroup,
 	DropdownMenuItem,
+	DropdownMenuLabel,
+	DropdownMenuSeparator,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdownMenu';
 import { Icon } from '@/components/ui/icons';
 import { api } from '@/lib/api';
 import { clearToken, githubInstallUrl } from '@/lib/auth';
 import { cn } from '@/lib/cn';
-import { useQuery } from '@tanstack/react-query';
+import { switchWorkspace, useMe } from '@/lib/me';
 import { useNavigate } from 'react-router-dom';
-
-type Me = {
-	id: string;
-	name: string | null;
-	avatarUrl: string | null;
-	login: string | null;
-	workspaceId: string;
-	hasInstallation: boolean;
-};
 
 async function logout() {
 	await api.post('/auth/logout').catch(() => {});
@@ -33,7 +26,7 @@ interface Props {
 
 function Profile({ collapsed }: Props) {
 	const navigate = useNavigate();
-	const { data: me } = useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/me').then((r) => r.data) });
+	const { data: me } = useMe();
 	const name = me?.name ?? me?.login ?? '';
 	const initials = name
 		.split(/\s+/)
@@ -70,6 +63,20 @@ function Profile({ collapsed }: Props) {
 				</DropdownMenuTrigger>
 
 				<DropdownMenuContent className='w-max' side='top'>
+					{me && me.workspaces.length > 1 && (
+						<>
+							<DropdownMenuLabel className='text-muted-foreground text-xs'>Workspace</DropdownMenuLabel>
+							<DropdownMenuGroup>
+								{me.workspaces.map((w) => (
+									<DropdownMenuItem key={w.id} disabled={w.id === me.workspaceId} onSelect={() => switchWorkspace(w.id)}>
+										<Icon icon='check' size='sm' className={cn(w.id !== me.workspaceId && 'invisible')} />
+										{w.name}
+									</DropdownMenuItem>
+								))}
+							</DropdownMenuGroup>
+							<DropdownMenuSeparator />
+						</>
+					)}
 					<DropdownMenuGroup>
 						<DropdownMenuItem onSelect={() => navigate('/settings')}>Configurações</DropdownMenuItem>
 						<DropdownMenuItem onSelect={() => navigate('/usage')}>Uso</DropdownMenuItem>

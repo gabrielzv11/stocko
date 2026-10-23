@@ -6,6 +6,7 @@ import { cn } from '@/lib/cn';
 import { motion } from 'motion/react';
 import { DndContext, PointerSensor, pointerWithin, useSensor, useSensors } from '@dnd-kit/core';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Feedback } from './feedback';
 import { Gutters, SelectionMenu, type Pin, type Selected, type Side, type SlotData } from './pins';
 import { Markdown } from './serializer';
 
@@ -13,7 +14,7 @@ export type Part =
 	| { type: 'text'; text: string }
 	| { type: 'reasoning'; text: string }
 	| { type: 'step'; id: string; label: string; done: boolean; failed: boolean };
-export type Message = { id: string; role: 'user' | 'assistant'; parts: Part[]; streaming?: boolean };
+export type Message = { id: string; role: 'user' | 'assistant'; parts: Part[]; streaming?: boolean; feedback?: 1 | -1 | null };
 
 type Activity = Exclude<Part, { type: 'text' }>;
 type Block = { kind: 'text'; text: string } | { kind: 'activity'; items: Activity[] };
@@ -23,6 +24,8 @@ interface Props extends React.HTMLAttributes<HTMLDivElement> {
 	typing?: boolean;
 	/** "Perguntar sobre" um trecho selecionado. */
 	onAsk?: (quote: string) => void;
+	/** Conversa compartilhada: sem 👍/👎 (pede login). */
+	readOnly?: boolean;
 }
 
 const textOf = (message: Message) => message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n\n');
@@ -137,7 +140,7 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 	);
 }
 
-function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
+function Conversation({ messages, typing, onAsk, readOnly, className, ...props }: Props) {
 	const endRef = useRef<HTMLDivElement>(null);
 	const [selected, setSelected] = useState<Selected | null>(null);
 	const [pins, setPins] = useState<Pin[]>([]);
@@ -261,7 +264,10 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 										);
 									})}
 									{!message.streaming && (
-										<CopyButton text={textOf(message).trim()} label='Copiar resposta' className='-mt-2 self-start' />
+										<div className='-mt-2 flex self-start'>
+											<CopyButton text={textOf(message).trim()} label='Copiar resposta' />
+											{!readOnly && <Feedback messageId={message.id} initial={message.feedback ?? null} />}
+										</div>
 									)}
 								</div>
 							);
@@ -291,10 +297,13 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 						boundary={scroller}
 						container={root}
 						onClose={() => setSelected(null)}
-						onAsk={() => {
-							onAsk?.(selected.text);
-							done();
-						}}
+						onAsk={
+							onAsk &&
+							(() => {
+								onAsk(selected.text);
+								done();
+							})
+						}
 						onPin={free && (() => pin(free.side, free.slot))}
 					/>
 				)}

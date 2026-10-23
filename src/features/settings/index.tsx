@@ -6,6 +6,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { useState } from 'react';
 import { toast } from 'sonner';
+import { MembersSection } from './members';
 
 type Provider = 'openrouter' | 'mangaba';
 
@@ -124,6 +125,7 @@ export default function SettingsPage() {
 			{isPending && <p className='text-muted-foreground text-sm'>Carregando...</p>}
 			{isError && <p className='text-sm text-red-500'>Não foi possível carregar as configurações.</p>}
 			{data && <SettingsForm settings={data} />}
+			<MembersSection />
 		</div>
 	);
 }
