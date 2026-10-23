@@ -6,6 +6,7 @@ import Home from './features/home';
 import { unsentIds } from './features/home/api';
 import Login from './features/login';
 import Projects from './features/projects';
+import ProjectPage from './features/projects/projectPage';
 import Usage from './features/usage';
 import { getToken } from './lib/auth';
 
@@ -36,6 +37,7 @@ function Router() {
 				<Route index element={<NewConversation />} />
 				<Route path='c/:id' element={<ConversationPage />} />
 				<Route path='projects' element={<Projects />} />
+				<Route path='projects/:id' element={<ProjectPage />} />
 				<Route path='usage' element={<Usage />} />
 			</Route>
 		</Routes>

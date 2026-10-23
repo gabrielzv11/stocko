@@ -45,7 +45,7 @@ function ProjectApis({ project }: { project: Project }) {
 	return (
 		<section className='flex flex-col gap-3 px-12 py-4'>
 			<div className='flex items-center justify-between gap-2'>
-				<h3 className='text-lg font-semibold'>APIs de {project.name}</h3>
+				<h3 className='text-lg font-semibold'>APIs</h3>
 				{!adding && (
 					<Button size='sm' onClick={() => setAdding(true)}>
 						Adicionar API

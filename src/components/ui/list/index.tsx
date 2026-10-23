@@ -71,7 +71,7 @@ function List<T extends { id: React.Key }>({
 		<main
 			onMouseOver={hover.onMouseOver}
 			onMouseLeave={hover.onMouseLeave}
-			className={cn('relative px-12', className)}
+			className={cn('relative  ', className)}
 			{...props}
 		>
 			<div
