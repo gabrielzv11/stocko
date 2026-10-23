@@ -13,20 +13,44 @@ import { agentTools } from './agent';
 import { apiTools } from './apis';
 import { requireAuth, type AuthVars } from './auth';
 import { db } from './db';
+import { env } from './env';
 import type { Prisma } from './generated/prisma/client';
 import { refreshStale } from './repos';
 import { workspaceLlm } from './settings';
 
 const MAX_STEPS = 25;
 const MAX_TITLE = 80;
+const MAX_MESSAGES_PER_MINUTE = 10;
+const MAX_QUESTION = 20_000;
+
+/** Why the workspace can't ask right now, or null. Counts what's already in the DB: no in-memory state, survives restarts. */
+async function limitError(workspaceId: string) {
+	const inWorkspace = { conversation: { workspaceId } };
+	const [recent, spent] = await Promise.all([
+		db.message.count({ where: { ...inWorkspace, role: 'user', createdAt: { gte: new Date(Date.now() - 60_000) } } }),
+		db.message.aggregate({
+			_sum: { cost: true },
+			where: { ...inWorkspace, role: 'assistant', createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+		}),
+	]);
+	if (recent >= MAX_MESSAGES_PER_MINUTE) return 'Muitas perguntas seguidas; aguarde um minuto.';
+	// ponytail: o custo só entra no fim do turno; turnos simultâneos podem passar um pouco do teto.
+	if (Number(spent._sum.cost ?? 0) >= env.MAX_DAILY_COST_USD)
+		return `Limite de gasto de US$ ${env.MAX_DAILY_COST_USD} nas últimas 24h atingido; tente mais tarde.`;
+	return null;
+}
 
 const body = z.object({
 	// Só a pergunta nova, só texto: o histórico vem do banco, então o cliente não consegue reescrevê-lo.
 	message: z.object({
 		role: z.literal('user'),
-		parts: z.array(z.object({ type: z.literal('text'), text: z.string().trim().min(1) })).min(1),
+		// Teto de tamanho: cada turno reenvia o histórico inteiro ao LLM.
+		parts: z
+			.array(z.object({ type: z.literal('text'), text: z.string().trim().min(1).max(MAX_QUESTION) }))
+			.min(1)
+			.max(10),
 	}),
-	projectIds: z.array(z.string()).default([]),
+	projectIds: z.array(z.string()).max(100).default([]),
 });
 
 /** Tokens and OpenRouter cost of the whole turn (every agent step). Null fields if the stream died mid-way; null cost on other providers. */
@@ -85,13 +109,17 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 	const id = c.req.param('id');
 	if (!/^[\w-]{1,64}$/.test(id)) return c.json({ error: 'invalid_id' }, 400);
 	const parsed = body.safeParse(await c.req.json().catch(() => null));
-	if (!parsed.success) return c.json({ error: 'invalid_body' }, 400);
+	if (!parsed.success)
+		return c.json({ error: 'invalid_body', message: `Pergunta vazia ou longa demais (máx. ${MAX_QUESTION.toLocaleString('pt-BR')} caracteres).` }, 400);
 	const { workspaceId } = c.var;
 	const { message, projectIds } = parsed.data;
 
 	// Anti-IDOR: id de conversa de outro workspace parece inexistente.
 	const owner = await db.conversation.findUnique({ where: { id }, select: { workspaceId: true } });
 	if (owner && owner.workspaceId !== workspaceId) return c.json({ error: 'not_found' }, 404);
+
+	const limited = await limitError(workspaceId);
+	if (limited) return c.json({ error: 'rate_limited', message: limited }, 429);
 
 	// Pergunta salva antes de rodar o agente: não se perde se o modelo falhar.
 	const newMessage = { role: 'user', parts: message.parts };
@@ -153,7 +181,7 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 		messages: await convertToModelMessages(history),
 		tools: {
 			...agentTools(repos.map((r) => ({ id: r.id, fullName: r.fullName }))),
-			...(apis.length ? apiTools(apis) : {}),
+			...(apis.length ? apiTools(apis, { workspaceId, userId: c.var.userId, conversationId: id }) : {}),
 			link_projects: tool({
 				description: 'Vincula esta conversa a projetos da lista. Só quando a pergunta for claramente sobre eles.',
 				inputSchema: z.object({ projectIds: z.array(z.string()).min(1) }),

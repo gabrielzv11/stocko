@@ -19,6 +19,8 @@ const schema = z.object({
 	// OpenRouter (openrouter.ai/keys). Model is any OpenRouter slug; avoid `:free` with client code.
 	OPENROUTER_API_KEY: z.string().min(1),
 	LLM_MODEL: z.string().default('anthropic/claude-sonnet-5.5'),
+	// Teto de gasto (USD) por workspace nas últimas 24h; só conta o custo reportado pelo OpenRouter (chave do servidor).
+	MAX_DAILY_COST_USD: z.coerce.number().positive().default(5),
 	// Mangaba Router (OpenAI-compatible). Key is per workspace (Settings), so only the base URL lives here.
 	MANGABA_BASE_URL: z
 		.url()

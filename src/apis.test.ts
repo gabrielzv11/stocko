@@ -11,7 +11,7 @@ process.env.OPENROUTER_API_KEY ||= 'test';
 const { env } = await import('./env');
 env.SECRETS_KEY ??= Buffer.alloc(32, 7).toString('base64');
 
-const { assertPublicUrl, buildUrl, isPrivateIp, parseSpec, seal, searchOperations, unseal } = await import('./apis');
+const { apiTools, assertPublicUrl, buildUrl, isPrivateIp, parseSpec, readCapped, seal, searchOperations, unseal } = await import('./apis');
 
 test('isPrivateIp / assertPublicUrl: block internal targets', async () => {
 	for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.0.1', '169.254.169.254', '100.64.0.1', '::1', 'fd12::1', 'fe80::1', '::ffff:127.0.0.1'])
@@ -40,4 +40,40 @@ test('seal/unseal: roundtrip, ciphertext hides the secret', () => {
 	const sealed = seal('Authorization: Bearer abc');
 	expect(sealed).not.toContain('abc');
 	expect(unseal(sealed)).toBe('Authorization: Bearer abc');
+	// Versioned; secrets sealed before the prefix still open; unknown versions don't.
+	expect(sealed.startsWith('v1.')).toBe(true);
+	expect(unseal(sealed.slice(3))).toBe('Authorization: Bearer abc');
+	expect(() => unseal(`v2.${sealed.slice(3)}`)).toThrow('versão');
+});
+
+test('readCapped: stops an endless body just past the limit', async () => {
+	let cancelled = false;
+	const endless = new ReadableStream<Uint8Array>({
+		pull: (c) => c.enqueue(new Uint8Array(1024).fill(97)),
+		cancel: () => {
+			cancelled = true;
+		},
+	});
+	const text = await readCapped(new Response(endless), 16 * 1024);
+	expect(text.length).toBeGreaterThan(16 * 1024);
+	expect(text.length).toBeLessThanOrEqual(17 * 1024);
+	expect(cancelled).toBe(true);
+	expect(await readCapped(new Response('{"ok":true}'), 16 * 1024)).toBe('{"ok":true}');
+});
+
+test('call_api: audit line for every call, blocked ones included', async () => {
+	const audit = { workspaceId: 'w1', userId: 'u1', conversationId: 'c1' };
+	const tools = apiTools([{ id: 'a1', title: 'Interna', baseUrl: 'http://127.0.0.1:9090' }], audit);
+	const lines: string[] = [];
+	const realInfo = console.info;
+	console.info = (...args: unknown[]) => lines.push(args.join(' '));
+	try {
+		const execute = tools.call_api.execute as unknown as (i: object, o: object) => Promise<string>;
+		const out = await execute({ api: 'a1', path: '/api/v1/query', query: { query: 'up' } }, { toolCallId: 't', messages: [] });
+		expect(out).toContain('rede privada');
+	} finally {
+		console.info = realInfo;
+	}
+	expect(lines).toHaveLength(1);
+	expect(JSON.parse(lines[0]!.replace('[call_api] ', ''))).toMatchObject({ ...audit, api: 'a1', path: '/api/v1/query', error: expect.stringContaining('rede privada') });
 });

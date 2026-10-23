@@ -19,17 +19,24 @@ function key() {
 	return Buffer.from(env.SECRETS_KEY, 'base64');
 }
 
-/** AES-256-GCM; "iv.tag.data" in base64. */
+// ponytail: só v1 (= SECRETS_KEY). Ao rotacionar: chave nova como v2, unseal escolhe pela versão, regravar os segredos.
+const KEY_VERSION = 'v1';
+
+/** AES-256-GCM; "v1.iv.tag.data" in base64. The version names the key, so SECRETS_KEY can be rotated. */
 export function seal(text: string) {
 	const iv = randomBytes(12);
 	const c = createCipheriv('aes-256-gcm', key(), iv);
 	const data = Buffer.concat([c.update(text, 'utf8'), c.final()]);
-	return [iv, c.getAuthTag(), data].map((b) => b.toString('base64')).join('.');
+	return [KEY_VERSION, ...[iv, c.getAuthTag(), data].map((b) => b.toString('base64'))].join('.');
 }
 
 export function unseal(sealed: string) {
-	const [iv, tag, data] = sealed.split('.').map((b) => Buffer.from(b, 'base64'));
-	if (!iv || !tag || !data) throw new Error('segredo corrompido');
+	const parts = sealed.split('.');
+	// No prefix: sealed before versioning, same key as v1.
+	const version = parts.length === 4 ? parts.shift() : KEY_VERSION;
+	if (version !== KEY_VERSION) throw new Error(`versão de segredo desconhecida: ${version}`);
+	const [iv, tag, data] = parts.map((b) => Buffer.from(b, 'base64'));
+	if (parts.length !== 3 || !iv || !tag || !data) throw new Error('segredo corrompido');
 	const d = createDecipheriv('aes-256-gcm', key(), iv);
 	d.setAuthTag(tag);
 	return Buffer.concat([d.update(data), d.final()]).toString('utf8');
@@ -121,6 +128,18 @@ export function buildUrl(baseUrl: string, path: string, query: Record<string, st
 	return url;
 }
 
+/** Body as text, reading only until it passes `max` bytes: a huge (or endless) response can't fill memory. */
+export async function readCapped(res: Response, max: number) {
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	// Leaving the for-await cancels the stream.
+	for await (const chunk of res.body ?? []) {
+		chunks.push(chunk);
+		if ((size += chunk.length) > max) break;
+	}
+	return Buffer.concat(chunks).toString('utf8');
+}
+
 // ---------- tools ----------
 
 type Api = { id: string; title: string; baseUrl: string | null };
@@ -129,7 +148,7 @@ type Api = { id: string; title: string; baseUrl: string | null };
  * Tools over the project's API specs (already filtered by workspace). Read-only: call_api is GET only,
  * so a prompt injection in code or in an API response can't change anything with the user's credentials.
  */
-export function apiTools(apis: Api[]) {
+export function apiTools(apis: Api[], audit: { workspaceId: string; userId: string; conversationId: string }) {
 	const specs = new Map<string, Promise<{ spec: Spec; authHeader: string | null }>>();
 
 	function find(id: string) {
@@ -179,21 +198,31 @@ export function apiTools(apis: Api[]) {
 				query: z.record(z.string(), z.string()).optional(),
 			}),
 			execute: safe(async ({ api, path, query }) => {
-				const a = find(api);
-				if (!a.baseUrl) throw new Error(`${a.title} não tem baseUrl: só documentação, não dá para chamar.`);
-				const url = buildUrl(a.baseUrl, path, query);
-				await assertPublicUrl(url.href);
-				const { authHeader } = await load(a.id);
-				const headers: Record<string, string> = { Accept: 'application/json' };
-				if (authHeader) {
-					const [name = '', ...value] = unseal(authHeader).split(':');
-					headers[name.trim()] = value.join(':').trim();
+				const started = Date.now();
+				// Audit: one line per call, blocked ones included, in the platform logs (Message.parts can be deleted with the conversation).
+				const log = (outcome: { status: number } | { error: string }) =>
+					console.info('[call_api]', JSON.stringify({ ...audit, api, path, query, ms: Date.now() - started, ...outcome }));
+				try {
+					const a = find(api);
+					if (!a.baseUrl) throw new Error(`${a.title} não tem baseUrl: só documentação, não dá para chamar.`);
+					const url = buildUrl(a.baseUrl, path, query);
+					await assertPublicUrl(url.href);
+					const { authHeader } = await load(a.id);
+					const headers: Record<string, string> = { Accept: 'application/json' };
+					if (authHeader) {
+						const [name = '', ...value] = unseal(authHeader).split(':');
+						headers[name.trim()] = value.join(':').trim();
+					}
+					// redirect: 'manual' — a 3xx to an internal host would bypass the SSRF check.
+					const res = await fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
+					const body = await readCapped(res, MAX_BYTES);
+					log({ status: res.status });
+					const text = `GET ${url.pathname}${url.search} → ${res.status}\n${body}`;
+					return text.length > MAX_BYTES ? text.slice(0, MAX_BYTES) + TRUNCATED : text;
+				} catch (e) {
+					log({ error: (e as Error).message });
+					throw e;
 				}
-				// redirect: 'manual' — a 3xx to an internal host would bypass the SSRF check.
-				const res = await fetch(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(CALL_TIMEOUT_MS) });
-				const body = await res.text();
-				const text = `GET ${url.pathname}${url.search} → ${res.status}\n${body}`;
-				return text.length > MAX_BYTES ? text.slice(0, MAX_BYTES) + TRUNCATED : text;
 			}),
 		}),
 	};
