@@ -1,6 +1,7 @@
 import { CircularProgress } from '@/components/ui/circularProgress';
 import { InputChat } from '@/features/home/inputChat';
 import { getToken } from '@/lib/auth';
+import { cn } from '@/lib/cn';
 import { useChat } from '@ai-sdk/react';
 import { useQueryClient } from '@tanstack/react-query';
 import { DefaultChatTransport, generateId, getToolName, isToolUIPart, type UIMessage } from 'ai';
@@ -131,7 +132,7 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 	}
 
 	return (
-		<div className='flex h-full flex-col'>
+		<div className='relative flex h-full flex-col'>
 			{empty ? (
 				<div className='mx-auto flex w-full max-w-3xl flex-1 flex-col justify-end gap-6 px-4 pb-6'>
 					<h1 className='text-center text-2xl font-semibold md:text-3xl'>Sobre o que vamos falar?</h1>
@@ -141,7 +142,8 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 				<Conversation messages={messages} typing={typing} onAsk={setQuote} className='min-h-0 flex-1' />
 			)}
 
-			<motion.div layout='position' className='mx-auto w-full max-w-3xl px-4 pb-4'>
+			{/* Com conversa, flutua sobre ela (relativo ao container, não à tela); vazio, fica no fluxo para centralizar. */}
+			<motion.div layout='position' className={cn('mx-auto w-full max-w-3xl px-4 pb-4', !empty && 'absolute inset-x-0 bottom-0')}>
 				<InputChat
 					selectedIds={selectedIds}
 					onToggleProject={toggleProject}

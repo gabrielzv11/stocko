@@ -139,11 +139,13 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 
 function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 	const endRef = useRef<HTMLDivElement>(null);
-	const columnRef = useRef<HTMLDivElement>(null);
-	const menuRef = useRef<HTMLDivElement>(null);
 	const [selected, setSelected] = useState<Selected | null>(null);
 	const [pins, setPins] = useState<Pin[]>([]);
-	const preview = useMemo(() => (selected ? clone(selected.range) : undefined), [selected]);
+	// Estado (não ref): o menu recebe os elementos como props no render.
+	const [root, setRoot] = useState<HTMLDivElement | null>(null);
+	const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+	const range = selected?.range;
+	const preview = useMemo(() => (range ? clone(range) : undefined), [range]);
 	const down = useRef({ x: 0, y: 0 });
 	// Distância mínima: clique em "Fixar" sem arrastar continua sendo clique.
 	const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -157,26 +159,15 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 		endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 	}, [messages.length, last?.parts.length, tailSize, waiting]);
 
-	// Clique fora do menu fecha. Seleção desfeita não: ao arrastar "Fixar" o botão sumiria no meio do drag.
-	useEffect(() => {
-		if (!selected) return;
-		const close = (e: PointerEvent) => {
-			if (!menuRef.current?.contains(e.target as Node)) setSelected(null);
-		};
-		document.addEventListener('pointerdown', close);
-		return () => document.removeEventListener('pointerdown', close);
-	}, [selected]);
-
 	// Contorno no bloco selecionado por clique (não há seleção nativa para mostrar).
+	const block = selected?.block;
 	useEffect(() => {
-		const block = selected?.block;
 		block?.toggleAttribute('data-selected', true);
 		return () => void block?.toggleAttribute('data-selected', false);
-	}, [selected]);
+	}, [block]);
 
 	function select(e: React.PointerEvent) {
 		const target = e.target as Element;
-		if (menuRef.current?.contains(target)) return;
 		const sel = getSelection();
 		let range: Range;
 		let text: string;
@@ -193,10 +184,7 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 			range.selectNode(block);
 			text = block.dataset.block || block.innerText;
 		}
-		const rect = range.getBoundingClientRect();
-		const column = columnRef.current!.getBoundingClientRect();
-		// Relativo à coluna, que rola junto: o menu acompanha o trecho.
-		setSelected({ range, text, block, x: rect.left + rect.width / 2 - column.left, y: rect.top - column.top });
+		setSelected({ range, text, block });
 	}
 
 	function done() {
@@ -237,13 +225,15 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 				else pin(to.side, to.slot);
 			}}
 		>
-			<div className={cn('@container relative flex flex-col', className)} {...props}>
+			<div ref={setRoot} className={cn('@container relative flex flex-col', className)} {...props}>
 				<div
-					className='min-h-0 flex-1 overflow-y-auto'
+					// Gutter dos dois lados: centro da coluna bate com o do input flutuante (centrado no container todo).
+					ref={setScroller}
+					className='min-h-0 flex-1 [scrollbar-gutter:stable_both-edges] overflow-y-auto'
 					onPointerDown={(e) => (down.current = { x: e.clientX, y: e.clientY })}
 					onPointerUp={select}
 				>
-					<div ref={columnRef} className='relative mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6'>
+					<div className='mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-40'>
 						{messages.map((message) => {
 							if (message.role === 'user') {
 								const { quote, text } = splitQuote(textOf(message));
@@ -291,21 +281,23 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 						)}
 
 						<div ref={endRef} />
-
-						{selected && (
-							<SelectionMenu
-								ref={menuRef}
-								selected={selected}
-								onAsk={() => {
-									onAsk?.(selected.text);
-									done();
-								}}
-								onPin={free && (() => pin(free.side, free.slot))}
-							/>
-						)}
 					</div>
 				</div>
 
+				{/* Fora da área rolável: eventos do menu (portal) não chegam ao onPointerUp dela. */}
+				{selected && root && scroller && (
+					<SelectionMenu
+						selected={selected}
+						boundary={scroller}
+						container={root}
+						onClose={() => setSelected(null)}
+						onAsk={() => {
+							onAsk?.(selected.text);
+							done();
+						}}
+						onPin={free && (() => pin(free.side, free.slot))}
+					/>
+				)}
 				<Gutters pins={pins} slots={SLOTS} preview={preview} onRemove={(id) => setPins((prev) => prev.filter((p) => p.id !== id))} />
 			</div>
 		</DndContext>

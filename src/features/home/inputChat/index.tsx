@@ -2,6 +2,7 @@ import { IconButton } from '@/components/ui/iconButton';
 import { Icon } from '@/components/ui/icons';
 import { useProjects } from '@/features/projects/api';
 import { cn } from '@/lib/cn';
+import { motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { ProjectPicker } from '../projectPicker';
 import { MarkdownEditor } from './markdownEditor';
@@ -28,6 +29,9 @@ function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, 
 	const formRef = useRef<HTMLFormElement>(null);
 	const [value, setValue] = useState('');
 	const [expanded, setExpanded] = useState(false);
+	const [focused, setFocused] = useState(false);
+	// Comprimido só sem foco e vazio.
+	const open = focused || !!value;
 	const { data: projects = [] } = useProjects();
 	const selected = projects.filter((p) => selectedIds.includes(p.id));
 	const canSend = !!value.trim() && !disabled;
@@ -45,8 +49,18 @@ function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, 
 	}
 
 	return (
-		<form
+		<motion.form
 			ref={formRef}
+			// Sem foco fica comprimido: "+ Projetos" e editor lado a lado, sem enviar/tela cheia.
+			// Troca row/column não anima em CSS; o layout do motion anima a altura (só quando abre/comprime).
+			layout
+			layoutDependency={open}
+			transition={{ duration: 0.25, ease: 'easeOut' }}
+			// borderRadius via style para o motion corrigir a distorção durante a animação.
+			style={{ borderRadius: 24 }}
+			onFocus={() => setFocused(true)}
+			// Foco indo para outro elemento do form (ex.: botões) não comprime.
+			onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setFocused(false)}
 			onSubmit={(e) => {
 				e.preventDefault();
 				send();
@@ -58,10 +72,14 @@ function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, 
 				e.preventDefault();
 				focusEditor(e.currentTarget);
 			}}
-			className={cn('border-border bg-input flex cursor-text flex-col gap-1 rounded-3xl border p-2 [&_button]:cursor-pointer', className)}
+			className={cn(
+				'border-border bg-input flex cursor-text flex-wrap gap-1 border p-2 [&_button]:cursor-pointer',
+				open ? 'flex-col' : 'items-center',
+				className,
+			)}
 		>
 			{(selected.length > 0 || quote) && (
-				<div className='flex flex-wrap gap-1.5 px-2 pt-1'>
+				<motion.div layout='position' layoutDependency={open} className='order-first flex w-full flex-wrap gap-1.5 px-2 pt-1'>
 					{quote && (
 						<span
 							data-chip
@@ -97,10 +115,10 @@ function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, 
 							</button>
 						</span>
 					))}
-				</div>
+				</motion.div>
 			)}
 
-			<div className='relative'>
+			<motion.div layout='position' layoutDependency={open} className='relative min-w-0 flex-1'>
 				<MarkdownEditor
 					value={value}
 					onChange={setValue}
@@ -109,11 +127,12 @@ function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, 
 					// min-height (0 → 60dvh) é animável, height: auto não; o campo cresce no lugar, empurrando a conversa.
 					// ponytail: 60dvh fixo; se o host tiver pouca altura, trocar por flex-grow no container do Home.
 					className={cn(
-						'pr-10 transition-[min-height,max-height] duration-300 ease-out',
+						'transition-[min-height,max-height] duration-300 ease-out',
+						open && 'pr-10',
 						expanded ? 'max-h-[60dvh] min-h-[60dvh]' : 'max-h-48 min-h-0',
 					)}
 				/>
-				{(expanded || value) && (
+				{open && (expanded || value) && (
 					<button
 						type='button'
 						aria-label={expanded ? 'Sair da tela cheia' : 'Tela cheia'}
@@ -125,9 +144,9 @@ function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, 
 						<Icon icon={expanded ? 'minimize-2' : 'maximize-2'} size='sm' />
 					</button>
 				)}
-			</div>
+			</motion.div>
 
-			<div className='flex items-center justify-between'>
+			<motion.div layout='position' layoutDependency={open} className={cn('flex items-center justify-between', !open && '-order-1')}>
 				<ProjectPicker selectedIds={selectedIds} onToggle={onToggleProject}>
 					<button
 						type='button'
@@ -139,9 +158,20 @@ function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, 
 					</button>
 				</ProjectPicker>
 
-				<IconButton type='submit' icon='arrow-up' size='sm' aria-label='Enviar' disabled={!canSend} className='rounded-full p-2' />
-			</div>
-		</form>
+				{open && (
+					<IconButton
+						type='submit'
+						icon='arrow-up'
+						size='sm'
+						aria-label='Enviar'
+						disabled={!canSend}
+						// Safari não foca botão no clique: sem isso o blur comprime o form antes do submit.
+						onMouseDown={(e) => e.preventDefault()}
+						className='rounded-full p-2'
+					/>
+				)}
+			</motion.div>
+		</motion.form>
 	);
 }
 

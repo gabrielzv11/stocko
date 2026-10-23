@@ -85,6 +85,15 @@ function PanZoom({
 		if (el) setView((v) => zoomAt(v, factor, el.clientWidth / 2, el.clientHeight / 2));
 	};
 
+	const tools = (position: string) => (
+		<div className={cn('border-border bg-card/90 absolute right-2 flex gap-0.5 rounded-lg border p-0.5 backdrop-blur', position)}>
+			<Tool icon='zoom-in' label='Aproximar' onClick={() => zoom(1.25)} />
+			<Tool icon='zoom-out' label='Afastar' onClick={() => zoom(0.8)} />
+			<Tool icon='rotate-ccw' label='Centralizar' onClick={() => setView(START)} />
+			{children}
+		</div>
+	);
+
 	return (
 		<div className={cn('relative overflow-hidden', className)}>
 			<div
@@ -111,12 +120,9 @@ function PanZoom({
 					dangerouslySetInnerHTML={{ __html: svg }}
 				/>
 			</div>
-			<div className='border-border bg-card/90 absolute right-2 bottom-2 flex gap-0.5 rounded-lg border p-0.5 backdrop-blur'>
-				<Tool icon='zoom-in' label='Aproximar' onClick={() => zoom(1.25)} />
-				<Tool icon='zoom-out' label='Afastar' onClick={() => zoom(0.8)} />
-				<Tool icon='rotate-ccw' label='Centralizar' onClick={() => setView(START)} />
-				{children}
-			</div>
+			{/* Diagrama alto: atalhos em cima e embaixo. No dialog cabe tudo e o topo é do botão de fechar. */}
+			{!fullscreen && tools('top-2')}
+			{tools('bottom-2')}
 		</div>
 	);
 }

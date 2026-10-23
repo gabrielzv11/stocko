@@ -1,11 +1,13 @@
 import { Icon } from '@/components/ui/icons';
 import { cn } from '@/lib/cn';
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { DragOverlay, useDndContext, useDraggable, useDroppable } from '@dnd-kit/core';
+import { useMemo } from 'react';
 
 export type Side = 'left' | 'right';
 export type Pin = { id: string; side: Side; slot: number; range: Range; content: DocumentFragment };
 /** `block`: diagrama/código/tabela selecionado inteiro por clique. */
-export type Selected = { range: Range; text: string; x: number; y: number; block?: HTMLElement };
+export type Selected = { range: Range; text: string; block?: HTMLElement };
 export type SlotData = { side: Side; slot: number };
 
 /** Id do arraste vindo do menu de seleção; os demais são ids de pins. */
@@ -17,47 +19,81 @@ const GUTTER: Record<Side, string> = { left: 'right-[calc(50%+25rem)]', right: '
 // Trecho clonado, sem prender ao DOM da conversa (que re-renderiza).
 const Fragment = ({ content }: { content: DocumentFragment }) => <div ref={(el) => el?.replaceChildren(content.cloneNode(true))} />;
 
+// Área sob o input flutuante (pb-40 da coluna): o menu não vai para lá.
+const COVERED = 160;
+
+// Trecho maior que a área visível: a âncora vira uma linha no topo visível e o menu cai logo abaixo dela.
+// Nos outros casos o flip do popover escolhe o lado (acima, ou abaixo se não couber).
+function anchorRect(range: Range, boundary: HTMLElement) {
+	const r = range.getBoundingClientRect();
+	const v = boundary.getBoundingClientRect();
+	return r.top < v.top && r.bottom > v.bottom - COVERED ? new DOMRect(r.x, v.top, r.width, 0) : r;
+}
+
 function SelectionMenu({
 	selected,
+	boundary,
+	container,
+	onClose,
 	onAsk,
 	onPin,
-	ref,
 }: {
 	selected: Selected;
+	/** Área rolável: limite do flip e fonte dos eventos de scroll que reposicionam o menu. */
+	boundary: HTMLElement;
+	/** Dentro do container da conversa, para o @6xl do "Fixar" valer. */
+	container: HTMLElement;
+	onClose: () => void;
 	onAsk: () => void;
 	/** Ausente com as laterais cheias. */
 	onPin?: () => void;
-	ref: React.Ref<HTMLDivElement>;
 }) {
 	const { setNodeRef, attributes, listeners } = useDraggable({ id: SELECTION, disabled: !onPin });
+	// Âncora virtual estável: o popover a re-mede no scroll, sem re-render do React. O floating-ui escuta o scroll
+	// dos ancestrais do contextElement (não dele mesmo), então ele precisa estar dentro da área rolável: o próprio trecho.
+	const anchor = useMemo(() => {
+		const node = selected.range.commonAncestorContainer;
+		const contextElement = node instanceof Element ? node : node.parentElement!;
+		return { current: { contextElement, getBoundingClientRect: () => anchorRect(selected.range, boundary) } };
+	}, [selected.range, boundary]);
 
 	return (
-		<div
-			ref={ref}
-			style={{ left: selected.x, top: selected.y }}
-			className='bg-popover text-popover-foreground ring-foreground/10 [&_button:hover]:bg-accent absolute z-10 flex -translate-x-1/2 -translate-y-[calc(100%+0.5rem)] gap-0.5 rounded-lg p-1 text-sm shadow-md ring-1 [&_button]:flex [&_button]:items-center [&_button]:gap-1.5 [&_button]:rounded-md [&_button]:px-2 [&_button]:py-1'
-		>
-			{/* Mantém a seleção visível ao clicar. */}
-			<button type='button' onMouseDown={(e) => e.preventDefault()} onClick={onAsk}>
-				<Icon icon='text-quote' size='sm' />
-				Perguntar sobre
-			</button>
-			{/* Só cabe nas laterais em telas largas. */}
-			{onPin && (
-				<button
-					ref={setNodeRef}
-					type='button'
-					title='Arraste para uma lateral (ou clique para fixar no primeiro espaço livre)'
-					onClick={onPin}
-					{...attributes}
-					{...listeners}
-					className='hidden cursor-grab touch-none @6xl:flex'
-				>
-					<Icon icon='grip-vertical' size='sm' />
-					Fixar
+		// Clique fora e Esc fecham (DismissableLayer do Radix).
+		<Popover open onOpenChange={(open) => !open && onClose()}>
+			<PopoverAnchor virtualRef={anchor} />
+			<PopoverContent
+				container={container}
+				side='top'
+				sideOffset={8}
+				collisionBoundary={boundary}
+				collisionPadding={{ top: 8, bottom: COVERED }}
+				// Não rouba o foco (nem desfaz a seleção) ao abrir/fechar.
+				onOpenAutoFocus={(e) => e.preventDefault()}
+				onCloseAutoFocus={(e) => e.preventDefault()}
+				className='[&_button:hover]:bg-accent w-auto flex-row gap-0.5 p-1 [&_button]:flex [&_button]:items-center [&_button]:gap-1.5 [&_button]:rounded-md [&_button]:px-2 [&_button]:py-1'
+			>
+				{/* Mantém a seleção visível ao clicar. */}
+				<button type='button' onMouseDown={(e) => e.preventDefault()} onClick={onAsk}>
+					<Icon icon='text-quote' size='sm' />
+					Perguntar sobre
 				</button>
-			)}
-		</div>
+				{/* Só cabe nas laterais em telas largas. */}
+				{onPin && (
+					<button
+						ref={setNodeRef}
+						type='button'
+						title='Arraste para uma lateral (ou clique para fixar no primeiro espaço livre)'
+						onClick={onPin}
+						{...attributes}
+						{...listeners}
+						className='hidden cursor-grab touch-none @6xl:flex'
+					>
+						<Icon icon='grip-vertical' size='sm' />
+						Fixar
+					</button>
+				)}
+			</PopoverContent>
+		</Popover>
 	);
 }
 

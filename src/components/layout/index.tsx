@@ -16,7 +16,7 @@ function Layout() {
 			/>
 			<div className='flex min-w-full flex-1 flex-col overflow-hidden md:min-w-0'>
 				<Header />
-				<main className='min-h-0 px-20 py-10 flex-1 overflow-auto'>
+				<main className='min-h-0 px-20 py-10 pb-4 flex-1 overflow-auto'>
 					<Outlet />
 				</main>
 			</div>
