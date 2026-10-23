@@ -21,6 +21,7 @@ import { workspaceLlm } from './settings';
 const MAX_STEPS = 25;
 const MAX_TITLE = 80;
 const MAX_MESSAGES_PER_MINUTE = 10;
+const MAX_QUESTION = 20_000;
 
 /** Why the workspace can't ask right now, or null. Counts what's already in the DB: no in-memory state, survives restarts. */
 async function limitError(workspaceId: string) {
@@ -43,9 +44,13 @@ const body = z.object({
 	// Só a pergunta nova, só texto: o histórico vem do banco, então o cliente não consegue reescrevê-lo.
 	message: z.object({
 		role: z.literal('user'),
-		parts: z.array(z.object({ type: z.literal('text'), text: z.string().trim().min(1) })).min(1),
+		// Teto de tamanho: cada turno reenvia o histórico inteiro ao LLM.
+		parts: z
+			.array(z.object({ type: z.literal('text'), text: z.string().trim().min(1).max(MAX_QUESTION) }))
+			.min(1)
+			.max(10),
 	}),
-	projectIds: z.array(z.string()).default([]),
+	projectIds: z.array(z.string()).max(100).default([]),
 });
 
 /** Tokens and OpenRouter cost of the whole turn (every agent step). Null fields if the stream died mid-way; null cost on other providers. */
@@ -104,7 +109,8 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 	const id = c.req.param('id');
 	if (!/^[\w-]{1,64}$/.test(id)) return c.json({ error: 'invalid_id' }, 400);
 	const parsed = body.safeParse(await c.req.json().catch(() => null));
-	if (!parsed.success) return c.json({ error: 'invalid_body' }, 400);
+	if (!parsed.success)
+		return c.json({ error: 'invalid_body', message: `Pergunta vazia ou longa demais (máx. ${MAX_QUESTION.toLocaleString('pt-BR')} caracteres).` }, 400);
 	const { workspaceId } = c.var;
 	const { message, projectIds } = parsed.data;
 

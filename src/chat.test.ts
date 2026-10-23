@@ -13,7 +13,7 @@ const { chat } = await import('./chat');
 const { db } = await import('./db');
 const { env } = await import('./env');
 
-test('chat: 429 over the 24h spend cap and over the per-minute rate, before touching the LLM', async () => {
+test('chat: 400 on an oversized question, 429 over the 24h spend cap and the per-minute rate, before touching the LLM', async () => {
 	const user = await db.user.create({
 		data: { name: 'test', memberships: { create: { workspace: { create: { name: 'test' } } } } },
 		include: { memberships: true },
@@ -22,16 +22,18 @@ test('chat: 429 over the 24h spend cap and over the per-minute rate, before touc
 	const token = crypto.randomUUID();
 	await db.session.create({ data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
 	const conversation = await db.conversation.create({ data: { workspaceId } });
-	const ask = async () => {
+	const ask = async (text = 'oi') => {
 		const res = await chat.request(`/conversations/${conversation.id}/messages`, {
 			method: 'POST',
 			headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-			body: JSON.stringify({ message: { role: 'user', parts: [{ type: 'text', text: 'oi' }] } }),
+			body: JSON.stringify({ message: { role: 'user', parts: [{ type: 'text', text }] } }),
 		});
 		return { status: res.status, body: (await res.json()) as { message: string } };
 	};
 
 	try {
+		expect(await ask('x'.repeat(20_001))).toMatchObject({ status: 400, body: { message: expect.stringContaining('longa demais') } });
+
 		const spent = await db.message.create({
 			data: { conversationId: conversation.id, role: 'assistant', parts: [], cost: env.MAX_DAILY_COST_USD },
 		});

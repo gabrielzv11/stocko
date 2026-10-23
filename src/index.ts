@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { auth } from './auth';
@@ -17,6 +18,12 @@ const app = new Hono();
 app.use(logger());
 // Bearer token auth, no cookies → no credentials needed.
 app.use(cors({ origin: env.FRONTEND_URL }));
+
+const tooLarge = (c: Context) => c.json({ error: 'payload_too_large' }, 413);
+const small = bodyLimit({ maxSize: 1024 * 1024, onError: tooLarge });
+// Spec OpenAPI (até 10 MB de texto) é o único corpo grande; folga para os escapes do JSON.
+const large = bodyLimit({ maxSize: 16 * 1024 * 1024, onError: tooLarge });
+app.use((c, next) => (c.req.method === 'POST' && /\/apis$/.test(c.req.path) ? large : small)(c, next));
 
 app.get('/health', async (c) => {
 	await db.$queryRaw`SELECT 1`;
