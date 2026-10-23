@@ -1,6 +1,6 @@
-// Subconjunto de markdown que o agente produz (chat.ts): parágrafos, títulos, listas, blocos de código,
+// Subconjunto de markdown que o agente produz (chat.ts): parágrafos, títulos, listas, blocos de código, tabelas,
 // negrito/itálico, código inline, links e referências `owner/repo/caminho#Lx-Ly@sha`.
-// ponytail: listas aninhadas viram itens planos e não há tabelas/citações; trocar por remark se o agente passar a usá-las.
+// ponytail: listas aninhadas viram itens planos, tabelas ignoram alinhamento e não há citações; trocar por remark se o agente passar a usá-las.
 
 export type Ref = { label: string; title: string; href: string };
 
@@ -15,7 +15,8 @@ export type Block =
 	| { type: 'paragraph'; children: Inline[] }
 	| { type: 'heading'; level: number; children: Inline[] }
 	| { type: 'list'; ordered: boolean; start: number; items: Inline[][] }
-	| { type: 'code'; lang: string; text: string };
+	| { type: 'code'; lang: string; text: string; closed: boolean }
+	| { type: 'table'; head: Inline[][]; rows: Inline[][][] };
 
 export const FENCE = /^\s*(`{3,}|~{3,})\s*([\w+#.-]*)/;
 export const HEADING = /^(#{1,6})\s+(.*)$/;
@@ -57,7 +58,18 @@ export function parseInline(src: string): Inline[] {
 	return out;
 }
 
-const startsBlock = (line: string) => FENCE.test(line) || HEADING.test(line) || LIST.test(line);
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+// Cabeçalho com `|` seguido da linha `|---|---|`; durante o streaming, até o separador chegar, fica como parágrafo.
+const isTable = (lines: string[], i: number) => lines[i].includes('|') && !!lines[i + 1]?.includes('|') && TABLE_SEP.test(lines[i + 1]);
+const cells = (row: string) =>
+	row
+		.trim()
+		.replace(/^\|/, '')
+		.replace(/(?<!\\)\|$/, '')
+		.split(/(?<!\\)\|/)
+		.map((cell) => parseInline(cell.trim().replace(/\\\|/g, '|')));
+
+const startsBlock = (lines: string[], i: number) => FENCE.test(lines[i]) || HEADING.test(lines[i]) || LIST.test(lines[i]) || isTable(lines, i);
 
 export function parseBlocks(src: string): Block[] {
 	const lines = src.replace(/\r\n?/g, '\n').split('\n');
@@ -73,8 +85,9 @@ export function parseBlocks(src: string): Block[] {
 			i++;
 			// Sem fechamento (resposta ainda em streaming) o bloco vai até o fim.
 			while (i < lines.length && !lines[i].trimStart().startsWith(fence[1])) body.push(lines[i++]);
+			const closed = i < lines.length;
 			i++;
-			blocks.push({ type: 'code', lang: fence[2], text: body.join('\n') });
+			blocks.push({ type: 'code', lang: fence[2], text: body.join('\n'), closed });
 			continue;
 		}
 
@@ -87,6 +100,15 @@ export function parseBlocks(src: string): Block[] {
 		if (heading) {
 			blocks.push({ type: 'heading', level: heading[1].length, children: parseInline(heading[2]) });
 			i++;
+			continue;
+		}
+
+		if (isTable(lines, i)) {
+			const head = cells(line);
+			const rows: Inline[][][] = [];
+			i += 2;
+			while (i < lines.length && lines[i].trim() && lines[i].includes('|')) rows.push(cells(lines[i++]));
+			blocks.push({ type: 'table', head, rows });
 			continue;
 		}
 
@@ -106,7 +128,7 @@ export function parseBlocks(src: string): Block[] {
 		}
 
 		const para: string[] = [];
-		while (i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines[i]))) para.push(lines[i++]);
+		while (i < lines.length && lines[i].trim() && (!para.length || !startsBlock(lines, i))) para.push(lines[i++]);
 		blocks.push({ type: 'paragraph', children: parseInline(para.join('\n')) });
 	}
 

@@ -3,7 +3,6 @@ import {
 	DropdownMenuContent,
 	DropdownMenuGroup,
 	DropdownMenuItem,
-	DropdownMenuLabel,
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdownMenu';
 import { Icon } from '@/components/ui/icons';
@@ -72,7 +71,7 @@ function Profile({ collapsed }: Props) {
 
 				<DropdownMenuContent className='w-max' side='top'>
 					<DropdownMenuGroup>
-						<DropdownMenuLabel>Configurações</DropdownMenuLabel>
+						<DropdownMenuItem onSelect={() => navigate('/settings')}>Configurações</DropdownMenuItem>
 						<DropdownMenuItem onSelect={() => navigate('/usage')}>Uso</DropdownMenuItem>
 						<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl)}>
 							{me?.hasInstallation ? 'Gerenciar acesso ao GitHub' : 'Conectar ao GitHub'}

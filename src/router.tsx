@@ -7,6 +7,7 @@ import { unsentIds } from './features/home/api';
 import Login from './features/login';
 import Projects from './features/projects';
 import ProjectPage from './features/projects/projectPage';
+import Settings from './features/settings';
 import Usage from './features/usage';
 import { getToken } from './lib/auth';
 
@@ -39,6 +40,7 @@ function Router() {
 				<Route path='projects' element={<Projects />} />
 				<Route path='projects/:id' element={<ProjectPage />} />
 				<Route path='usage' element={<Usage />} />
+				<Route path='settings' element={<Settings />} />
 			</Route>
 		</Routes>
 	);

@@ -55,8 +55,7 @@ function toParts(m: UIMessage, live: boolean): Part[] {
 		if (p.type === 'text' || p.type === 'reasoning') return p.text ? [{ type: p.type, text: p.text }] : [];
 		if (!isToolUIPart(p)) return [];
 		// As tools devolvem erros como texto "erro: ..." (agent.ts) em vez de output-error.
-		const failed =
-			p.state === 'output-error' || (p.state === 'output-available' && String(p.output).startsWith('erro:'));
+		const failed = p.state === 'output-error' || (p.state === 'output-available' && String(p.output).startsWith('erro:'));
 		return [
 			{
 				type: 'step',
@@ -82,11 +81,10 @@ export default function Home({ id }: Props) {
 	const [unsent] = useState(() => !!id && unsentIds.has(id));
 	const history = useConversationMessages(unsent ? undefined : id);
 
-	if (history.isError)
-		return <p className='p-6 text-center text-muted-foreground'>Não foi possível carregar a conversa.</p>;
+	if (history.isError) return <p className='text-muted-foreground p-6 text-center'>Não foi possível carregar a conversa.</p>;
 	if (history.isLoading)
 		return (
-			<div className='flex h-full items-center justify-center text-muted-foreground'>
+			<div className='text-muted-foreground flex h-full items-center justify-center'>
 				<CircularProgress />
 			</div>
 		);
@@ -96,6 +94,7 @@ export default function Home({ id }: Props) {
 function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[] }) {
 	const queryClient = useQueryClient();
 	const [selectedIds, setSelectedIds] = useState<string[]>([]);
+	const [quote, setQuote] = useState<string>();
 	const chat = useChat({
 		id,
 		messages: initialMessages,
@@ -125,7 +124,10 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 
 	function send(content: string) {
 		unsentIds.delete(id);
-		chat.sendMessage({ text: content }, { body: { projectIds: selectedIds } });
+		// Citação vai como blockquote no início do texto: o modelo lê como contexto e a conversa a separa ao exibir.
+		const text = quote ? `${quote.replace(/^/gm, '> ')}\n\n${content}` : content;
+		chat.sendMessage({ text }, { body: { projectIds: selectedIds } });
+		setQuote(undefined);
 	}
 
 	return (
@@ -136,7 +138,7 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 					<Projects selectedIds={selectedIds} onToggle={toggleProject} />
 				</div>
 			) : (
-				<Conversation messages={messages} typing={typing} className='min-h-0 flex-1' />
+				<Conversation messages={messages} typing={typing} onAsk={setQuote} className='min-h-0 flex-1' />
 			)}
 
 			<motion.div layout='position' className='mx-auto w-full max-w-3xl px-4 pb-4'>
@@ -144,6 +146,8 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 					selectedIds={selectedIds}
 					onToggleProject={toggleProject}
 					onSend={send}
+					quote={quote}
+					onClearQuote={() => setQuote(undefined)}
 					disabled={typing}
 				/>
 			</motion.div>

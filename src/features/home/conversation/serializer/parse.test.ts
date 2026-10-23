@@ -29,12 +29,25 @@ test('blocos: parágrafo, lista numerada, código (inclusive sem fechar)', () =>
 	const blocks = parseBlocks('Intro\n\n1. um\n   cont\n2. dois\n\n```ts\nconst a = 1;\n```\nfim\n\n```js\nlet b');
 	expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'list', 'code', 'paragraph', 'code']);
 	expect(blocks[1]).toMatchObject({ ordered: true, start: 1, items: [[{ text: 'um cont' }], [{ text: 'dois' }]] });
-	expect(blocks[2]).toEqual({ type: 'code', lang: 'ts', text: 'const a = 1;' });
-	expect(blocks[4]).toEqual({ type: 'code', lang: 'js', text: 'let b' });
+	expect(blocks[2]).toEqual({ type: 'code', lang: 'ts', text: 'const a = 1;', closed: true });
+	expect(blocks[4]).toEqual({ type: 'code', lang: 'js', text: 'let b', closed: false });
 });
 
 test('lista sem linha em branco antes interrompe parágrafo só depois da primeira linha', () => {
 	expect(parseBlocks('Como funciona:\n- a\n- b').map((b) => b.type)).toEqual(['paragraph', 'list']);
+});
+
+test('tabela GFM interrompe parágrafo e termina na linha sem `|`', () => {
+	const blocks = parseBlocks('Notas:\n| C | Nota |\n|:--|--:|\n| **C1** | 0, 40 |\n| a \\| b | 200 |\nfim');
+	expect(blocks.map((b) => b.type)).toEqual(['paragraph', 'table', 'paragraph']);
+	expect(blocks[1]).toMatchObject({
+		head: [[{ text: 'C' }], [{ text: 'Nota' }]],
+		rows: [
+			[[{ type: 'strong' }], [{ text: '0, 40' }]],
+			[[{ text: 'a | b' }], [{ text: '200' }]],
+		],
+	});
+	expect(parseBlocks('| a | b |').map((b) => b.type)).toEqual(['paragraph']); // sem separador ainda (streaming)
 });
 
 test('highlight: texto do editor continua sendo o markdown cru', async () => {

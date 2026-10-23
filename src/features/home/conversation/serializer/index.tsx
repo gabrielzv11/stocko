@@ -1,6 +1,7 @@
 import { CopyButton } from '@/components/ui/copyButton';
 import { Icon } from '@/components/ui/icons';
 import { motion } from 'motion/react';
+import { MermaidDiagram } from './mermaid';
 import { parseBlocks, type Block, type Inline } from './parse';
 
 // ponytail: um motion.span por letra, só enquanto a mensagem está em streaming; agrupar por palavra se respostas longas pesarem
@@ -94,16 +95,49 @@ function BlockView({ block, streaming }: { block: Block; streaming?: boolean }) 
 				</Tag>
 			);
 		}
-		case 'code':
+		case 'code': {
+			const source = (
+				<pre className='overflow-x-auto p-3 font-mono text-sm leading-relaxed'>
+					<code>{block.text}</code>
+				</pre>
+			);
 			return (
 				<div className='border-border bg-card overflow-hidden rounded-xl border'>
-					<div className='border-border text-muted-foreground flex items-center justify-between border-b py-1 pr-1 pl-3 text-xs'>
-						<span className='font-mono'>{block.lang || 'código'}</span>
+					<div className='text-muted-foreground flex items-center justify-between py-1 pr-1 pl-3 text-xs'>
+						{/* <span className='font-mono'>{block.lang || 'código'}</span> */}
+						<div></div>
 						<CopyButton text={block.text} label='Copiar código' />
 					</div>
-					<pre className='overflow-x-auto p-3 font-mono text-sm leading-relaxed'>
-						<code>{block.text}</code>
-					</pre>
+					{/* Só renderiza com o bloco fechado: durante o streaming o código está incompleto. */}
+					{block.lang === 'mermaid' && block.closed ? <MermaidDiagram code={block.text} fallback={source} /> : source}
+				</div>
+			);
+		}
+		case 'table':
+			return (
+				<div className='border-border overflow-x-auto rounded-xl border'>
+					<table className='w-full text-sm'>
+						<thead className='bg-muted/50'>
+							<tr>
+								{block.head.map((cell, i) => (
+									<th key={i} className='border-border border-b px-3 py-2 text-left font-semibold'>
+										<Inlines nodes={cell} streaming={streaming} />
+									</th>
+								))}
+							</tr>
+						</thead>
+						<tbody>
+							{block.rows.map((row, r) => (
+								<tr key={r} className='border-border border-b last:border-0'>
+									{row.map((cell, i) => (
+										<td key={i} className='px-3 py-2 align-top'>
+											<Inlines nodes={cell} streaming={streaming} />
+										</td>
+									))}
+								</tr>
+							))}
+						</tbody>
+					</table>
 				</div>
 			);
 	}

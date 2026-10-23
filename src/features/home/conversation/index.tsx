@@ -4,7 +4,9 @@ import { CopyButton } from '@/components/ui/copyButton';
 import { Icon } from '@/components/ui/icons';
 import { cn } from '@/lib/cn';
 import { motion } from 'motion/react';
-import { useEffect, useRef, useState } from 'react';
+import { DndContext, PointerSensor, pointerWithin, useSensor, useSensors } from '@dnd-kit/core';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Gutters, SelectionMenu, type Pin, type Selected, type Side, type SlotData } from './pins';
 import { Markdown } from './serializer';
 
 export type Part =
@@ -19,9 +21,25 @@ type Block = { kind: 'text'; text: string } | { kind: 'activity'; items: Activit
 interface Props extends React.HTMLAttributes<HTMLDivElement> {
 	messages: Message[];
 	typing?: boolean;
+	/** "Perguntar sobre" um trecho selecionado. */
+	onAsk?: (quote: string) => void;
 }
 
 const textOf = (message: Message) => message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n\n');
+
+/** Separa a citação ("> ..." no início, ver Chat.send) do resto da pergunta. */
+function splitQuote(text: string) {
+	const lines = text.split('\n');
+	const end = lines.findIndex((line) => !line.startsWith('>'));
+	const cut = end === -1 ? lines.length : end;
+	return {
+		quote: lines
+			.slice(0, cut)
+			.map((line) => line.replace(/^> ?/, ''))
+			.join('\n'),
+		text: lines.slice(cut).join('\n').trim(),
+	};
+}
 
 /** Passos e raciocínio consecutivos viram um bloco de atividade entre os trechos de texto. */
 function toBlocks(parts: Part[]) {
@@ -34,6 +52,9 @@ function toBlocks(parts: Part[]) {
 	}
 	return blocks;
 }
+
+/** Blocos fixados por lateral: cada um ocupa uma faixa fixa, sem sobrepor. */
+const SLOTS = [0, 1, 2];
 
 const REVEAL_CPS = 45;
 
@@ -57,12 +78,7 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 	const shown = useReveal(total, live);
 	const revealing = shown < total;
 	const steps = items.filter((item) => item.type === 'step').length;
-	const summary =
-		live || revealing
-			? 'Trabalhando…'
-			: steps
-				? `Consultou o código · ${steps} ${steps === 1 ? 'passo' : 'passos'}`
-				: 'Raciocínio';
+	const summary = live || revealing ? 'Trabalhando…' : steps ? `Consultou o código · ${steps} ${steps === 1 ? 'passo' : 'passos'}` : 'Raciocínio';
 
 	useEffect(() => {
 		if (revealing) listRef.current?.scrollIntoView({ block: 'end' });
@@ -91,11 +107,7 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 					item.type === 'step' ? (
 						<li key={item.id} className='flex items-center gap-2'>
 							{item.done ? (
-								<Icon
-									icon={item.failed ? 'x' : 'check'}
-									size='xs'
-									className={cn('shrink-0', item.failed && 'text-red-500')}
-								/>
+								<Icon icon={item.failed ? 'x' : 'check'} size='xs' className={cn('shrink-0', item.failed && 'text-red-500')} />
 							) : (
 								<CircularProgress className='size-3 shrink-0' />
 							)}
@@ -110,15 +122,22 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 						<li key={i} className='whitespace-pre-wrap italic'>
 							{item.text}
 						</li>
-					)
+					),
 				)}
 			</ul>
 		</details>
 	);
 }
 
-function Conversation({ messages, typing, className, ...props }: Props) {
+function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 	const endRef = useRef<HTMLDivElement>(null);
+	const columnRef = useRef<HTMLDivElement>(null);
+	const menuRef = useRef<HTMLDivElement>(null);
+	const [selected, setSelected] = useState<Selected | null>(null);
+	const [pins, setPins] = useState<Pin[]>([]);
+	const preview = useMemo(() => selected?.range.cloneContents(), [selected]);
+	// Distância mínima: clique em "Fixar" sem arrastar continua sendo clique.
+	const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 	const last = messages.at(-1);
 	const tail = last?.parts.at(-1);
 	// "Digitando" até algo chegar, e de novo entre um passo concluído e o próximo pedaço do modelo
@@ -129,52 +148,121 @@ function Conversation({ messages, typing, className, ...props }: Props) {
 		endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
 	}, [messages.length, last?.parts.length, tailSize, waiting]);
 
+	// Clique fora do menu fecha. Seleção desfeita não: ao arrastar "Fixar" o botão sumiria no meio do drag.
+	useEffect(() => {
+		if (!selected) return;
+		const close = (e: PointerEvent) => {
+			if (!menuRef.current?.contains(e.target as Node)) setSelected(null);
+		};
+		document.addEventListener('pointerdown', close);
+		return () => document.removeEventListener('pointerdown', close);
+	}, [selected]);
+
+	function select(e: React.PointerEvent) {
+		if (menuRef.current?.contains(e.target as Node)) return;
+		const sel = getSelection();
+		if (!sel?.rangeCount || !sel.toString().trim()) return setSelected(null);
+		const range = sel.getRangeAt(0).cloneRange();
+		const rect = range.getBoundingClientRect();
+		const column = columnRef.current!.getBoundingClientRect();
+		// Relativo à coluna, que rola junto: o menu acompanha o trecho.
+		setSelected({ range, x: rect.left + rect.width / 2 - column.left, y: rect.top - column.top });
+	}
+
+	function done() {
+		setSelected(null);
+		getSelection()?.removeAllRanges();
+	}
+
+	const free = (['right', 'left'] as const)
+		.flatMap((side) => SLOTS.map((slot) => ({ side, slot })))
+		.find(({ side, slot }) => !pins.some((p) => p.side === side && p.slot === slot));
+
+	function pin(side: Side, slot: number) {
+		if (!selected) return;
+		const { range } = selected;
+		setPins((prev) => [...prev, { id: crypto.randomUUID(), side, slot, range, content: range.cloneContents() }]);
+		done();
+	}
+
 	return (
-		<div className={cn('overflow-y-auto', className)} {...props}>
-			<div className='mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6'>
-				{messages.map((message) =>
-					message.role === 'user' ? (
-						<div key={message.id} className='flex max-w-[85%] flex-col items-end gap-2 self-end'>
-							<div className='bg-card rounded-2xl px-4 py-2.5 whitespace-pre-wrap'>{textOf(message)}</div>
-							<CopyButton text={textOf(message).trim()} label='Copiar pergunta' />
-						</div>
-					) : (
-						<div key={message.id} className='flex flex-col gap-4'>
-							{toBlocks(message.parts).map((block, i, blocks) => {
-								const live = !!message.streaming && i === blocks.length - 1;
-								return block.kind === 'activity' ? (
-									<ActivityLog key={i} items={block.items} live={live} />
-								) : (
-									<Markdown key={i} text={block.text} streaming={message.streaming} />
+		<DndContext
+			sensors={sensors}
+			collisionDetection={pointerWithin}
+			onDragEnd={({ over }) => {
+				if (!over) return;
+				const { side, slot } = over.data.current as SlotData;
+				pin(side, slot);
+			}}
+		>
+			<div className={cn('@container relative flex flex-col', className)} {...props}>
+				<div className='min-h-0 flex-1 overflow-y-auto' onPointerUp={select}>
+					<div ref={columnRef} className='relative mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 py-6'>
+						{messages.map((message) => {
+							if (message.role === 'user') {
+								const { quote, text } = splitQuote(textOf(message));
+								return (
+									<div key={message.id} className='flex max-w-[85%] flex-col items-end gap-2 self-end'>
+										{quote && (
+											<div className='text-muted-foreground flex items-start gap-1.5 text-sm'>
+												<Icon icon='text-quote' size='xs' className='mt-1 shrink-0' />
+												<span className='line-clamp-2'>{quote}</span>
+											</div>
+										)}
+										<div className='bg-card rounded-2xl px-4 py-2.5 whitespace-pre-wrap'>{text}</div>
+										<CopyButton text={textOf(message).trim()} label='Copiar pergunta' />
+									</div>
 								);
-							})}
-							{!message.streaming && (
-								<CopyButton
-									text={textOf(message).trim()}
-									label='Copiar resposta'
-									className='-mt-2 self-start'
-								/>
-							)}
-						</div>
-					)
-				)}
+							}
+							return (
+								<div key={message.id} className='flex flex-col gap-4'>
+									{toBlocks(message.parts).map((block, i, blocks) => {
+										const live = !!message.streaming && i === blocks.length - 1;
+										return block.kind === 'activity' ? (
+											<ActivityLog key={i} items={block.items} live={live} />
+										) : (
+											<Markdown key={i} text={block.text} streaming={message.streaming} />
+										);
+									})}
+									{!message.streaming && (
+										<CopyButton text={textOf(message).trim()} label='Copiar resposta' className='-mt-2 self-start' />
+									)}
+								</div>
+							);
+						})}
 
-				{waiting && (
-					<div role='status' aria-label='Digitando' className='flex gap-1 py-2'>
-						{[0, 1, 2].map((i) => (
-							<motion.span
-								key={i}
-								className='bg-muted-foreground size-2 rounded-full'
-								animate={{ opacity: [0.3, 1, 0.3] }}
-								transition={{ repeat: Infinity, duration: 1, delay: i * 0.15 }}
+						{waiting && (
+							<div role='status' aria-label='Digitando' className='flex gap-1 py-2'>
+								{[0, 1, 2].map((i) => (
+									<motion.span
+										key={i}
+										className='bg-muted-foreground size-2 rounded-full'
+										animate={{ opacity: [0.3, 1, 0.3] }}
+										transition={{ repeat: Infinity, duration: 1, delay: i * 0.15 }}
+									/>
+								))}
+							</div>
+						)}
+
+						<div ref={endRef} />
+
+						{selected && (
+							<SelectionMenu
+								ref={menuRef}
+								selected={selected}
+								onAsk={() => {
+									onAsk?.(selected.range.toString().trim());
+									done();
+								}}
+								onPin={free && (() => pin(free.side, free.slot))}
 							/>
-						))}
+						)}
 					</div>
-				)}
+				</div>
 
-				<div ref={endRef} />
+				<Gutters pins={pins} slots={SLOTS} preview={preview} onRemove={(id) => setPins((prev) => prev.filter((p) => p.id !== id))} />
 			</div>
-		</div>
+		</DndContext>
 	);
 }
 

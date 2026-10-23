@@ -126,11 +126,16 @@ export default function UsagePage() {
 	return (
 		<div className='mx-auto flex w-full max-w-5xl flex-col gap-4 p-4 md:p-6'>
 			<div>
-				<h1 className='text-2xl font-semibold'>Uso do OpenRouter</h1>
+				<h1 className='text-2xl font-semibold'>Uso de tokens</h1>
 				<p className='text-muted-foreground text-sm'>
 					Últimos {data.days} dias · atualizado {dayjs(dataUpdatedAt).format('HH:mm')}
 				</p>
 			</div>
+
+			<p role='note' className='rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm'>
+				Cálculo ainda impreciso para provedores diferentes do OpenRouter: o Mangaba Router não informa o custo (entra como US$ 0) e a contagem
+				de tokens depende do que o provedor reporta.
+			</p>
 
 			<div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
 				<Stat label='Custo' value={usd(totals.cost)} hint={`${totals.turns} respostas`} />

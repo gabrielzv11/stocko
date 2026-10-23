@@ -29,8 +29,8 @@
 	--input: oklch(29.82% 0.00143 15.934);
 	--input-foreground: oklch(0.96 0.008 90);
 
-	--accent: oklch(0.96 0.008 90);
-	--accent-foreground: oklch(60.325% 0.00007 271.152);
+	--accent: oklch(52.081% 0.00006 271.152);
+	--accent-foreground: oklch(24.884% 0.0015 16.221);
 }
 
 @theme inline {

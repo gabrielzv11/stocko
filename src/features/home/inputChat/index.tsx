@@ -2,7 +2,7 @@ import { IconButton } from '@/components/ui/iconButton';
 import { Icon } from '@/components/ui/icons';
 import { useProjects } from '@/features/projects/api';
 import { cn } from '@/lib/cn';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ProjectPicker } from '../projectPicker';
 import { MarkdownEditor } from './markdownEditor';
 
@@ -10,16 +10,32 @@ interface Props {
 	selectedIds: string[];
 	onToggleProject: (id: string) => void;
 	onSend: (content: string) => void;
+	/** Trecho da conversa que acompanha a próxima pergunta. */
+	quote?: string;
+	onClearQuote?: () => void;
 	disabled?: boolean;
 	className?: string;
 }
 
-function InputChat({ selectedIds, onToggleProject, onSend, disabled, className }: Props) {
+function focusEditor(form: HTMLFormElement) {
+	const editor = form.querySelector<HTMLElement>('[contenteditable]')!;
+	editor.focus();
+	getSelection()?.selectAllChildren(editor);
+	getSelection()?.collapseToEnd();
+}
+
+function InputChat({ selectedIds, onToggleProject, onSend, quote, onClearQuote, disabled, className }: Props) {
+	const formRef = useRef<HTMLFormElement>(null);
 	const [value, setValue] = useState('');
 	const [expanded, setExpanded] = useState(false);
 	const { data: projects = [] } = useProjects();
 	const selected = projects.filter((p) => selectedIds.includes(p.id));
 	const canSend = !!value.trim() && !disabled;
+
+	// "Perguntar sobre" leva direto para a digitação.
+	useEffect(() => {
+		if (quote) focusEditor(formRef.current!);
+	}, [quote]);
 
 	function send() {
 		if (!canSend) return;
@@ -30,6 +46,7 @@ function InputChat({ selectedIds, onToggleProject, onSend, disabled, className }
 
 	return (
 		<form
+			ref={formRef}
 			onSubmit={(e) => {
 				e.preventDefault();
 				send();
@@ -39,15 +56,30 @@ function InputChat({ selectedIds, onToggleProject, onSend, disabled, className }
 			onMouseDown={(e) => {
 				if ((e.target as HTMLElement).closest('button, a, [contenteditable], [data-chip]')) return;
 				e.preventDefault();
-				const editor = e.currentTarget.querySelector<HTMLElement>('[contenteditable]')!;
-				editor.focus();
-				getSelection()?.selectAllChildren(editor);
-				getSelection()?.collapseToEnd();
+				focusEditor(e.currentTarget);
 			}}
 			className={cn('border-border bg-input flex cursor-text flex-col gap-1 rounded-3xl border p-2 [&_button]:cursor-pointer', className)}
 		>
-			{selected.length > 0 && (
+			{(selected.length > 0 || quote) && (
 				<div className='flex flex-wrap gap-1.5 px-2 pt-1'>
+					{quote && (
+						<span
+							data-chip
+							title={quote}
+							className='bg-card flex max-w-full cursor-default items-center gap-1.5 rounded-full py-0.5 pr-1 pl-2.5 text-xs'
+						>
+							<Icon icon='text-quote' size='xs' className='text-muted-foreground shrink-0' />
+							<span className='truncate'>{quote}</span>
+							<button
+								type='button'
+								aria-label='Remover citação'
+								onClick={onClearQuote}
+								className='text-muted-foreground hover:text-foreground rounded-full p-0.5'
+							>
+								<Icon icon='x' size='xs' />
+							</button>
+						</span>
+					)}
 					{selected.map((project) => (
 						<span
 							key={project.id}
