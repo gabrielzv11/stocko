@@ -147,17 +147,12 @@ const createProject = z.object({
 	repoIds: z.array(z.string()).min(1),
 });
 
-projects.post('/projects', requireAuth, async (c) => {
-	const body = createProject.safeParse(await c.req.json().catch(() => null));
-	if (!body.success) return c.json({ error: 'invalid_body' }, 400);
-	const { workspaceId } = c.var;
-
-	// Only repos this workspace's installations can reach (anti-IDOR).
-	const repos = (await accessibleRepos(workspaceId)).filter((r) => body.data.repoIds.includes(r.id));
-	if (repos.length !== new Set(body.data.repoIds).size) return c.json({ error: 'unknown_repo' }, 400);
-
+/** Repository rows for GitHub repo ids, or null if any isn't reachable by the workspace's installations (anti-IDOR). */
+async function upsertRepos(workspaceId: string, repoIds: string[]) {
+	const repos = (await accessibleRepos(workspaceId)).filter((r) => repoIds.includes(r.id));
+	if (repos.length !== new Set(repoIds).size) return null;
 	// One Repository row per workspace, shared by every project that uses it.
-	const rows = await Promise.all(
+	return Promise.all(
 		repos.map((r) => {
 			const data = { installationId: r.installationId, fullName: r.fullName, defaultBranch: r.defaultBranch, sizeKb: r.sizeKb };
 			return db.repository.upsert({
@@ -167,6 +162,15 @@ projects.post('/projects', requireAuth, async (c) => {
 			});
 		})
 	);
+}
+
+projects.post('/projects', requireAuth, async (c) => {
+	const body = createProject.safeParse(await c.req.json().catch(() => null));
+	if (!body.success) return c.json({ error: 'invalid_body' }, 400);
+	const { workspaceId } = c.var;
+
+	const rows = await upsertRepos(workspaceId, body.data.repoIds);
+	if (!rows) return c.json({ error: 'unknown_repo' }, 400);
 	const project = await db.project.create({
 		data: {
 			workspaceId,
@@ -177,6 +181,28 @@ projects.post('/projects', requireAuth, async (c) => {
 	// Clone in the background so the first question finds the code ready.
 	for (const r of rows) void syncRepo(r.id);
 	return c.json({ id: project.id }, 201);
+});
+
+/** Rename and/or replace the repo set; repos left out stay in the workspace (other projects may use them). */
+projects.patch('/projects/:id', requireAuth, async (c) => {
+	const body = createProject.partial().safeParse(await c.req.json().catch(() => null));
+	if (!body.success) return c.json({ error: 'invalid_body' }, 400);
+	const { workspaceId } = c.var;
+	const project = await db.project.findFirst({ where: { id: c.req.param('id'), workspaceId }, include: { sources: true } });
+	if (!project) return c.json({ error: 'not_found' }, 404);
+
+	if (body.data.repoIds) {
+		const rows = await upsertRepos(workspaceId, body.data.repoIds);
+		if (!rows) return c.json({ error: 'unknown_repo' }, 400);
+		const added = rows.filter((r) => !project.sources.some((s) => s.repositoryId === r.id));
+		await db.$transaction([
+			db.projectSource.deleteMany({ where: { projectId: project.id, repositoryId: { notIn: rows.map((r) => r.id) } } }),
+			db.projectSource.createMany({ data: added.map((r) => ({ projectId: project.id, type: 'github_repo' as const, repositoryId: r.id })) }),
+		]);
+		for (const r of added) void syncRepo(r.id);
+	}
+	if (body.data.name) await db.project.update({ where: { id: project.id }, data: { name: body.data.name } });
+	return c.body(null, 204);
 });
 
 const apiSummary = { id: true, title: true, description: true, usage: true, baseUrl: true, createdAt: true } as const;
