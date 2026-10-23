@@ -24,6 +24,8 @@ interface Props extends React.HTMLAttributes<HTMLDivElement> {
 	typing?: boolean;
 	/** "Perguntar sobre" um trecho selecionado. */
 	onAsk?: (quote: string) => void;
+	/** Conversa compartilhada: sem 👍/👎 (pede login). */
+	readOnly?: boolean;
 }
 
 const textOf = (message: Message) => message.parts.map((p) => (p.type === 'text' ? p.text : '')).join('\n\n');
@@ -138,7 +140,7 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 	);
 }
 
-function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
+function Conversation({ messages, typing, onAsk, readOnly, className, ...props }: Props) {
 	const endRef = useRef<HTMLDivElement>(null);
 	const [selected, setSelected] = useState<Selected | null>(null);
 	const [pins, setPins] = useState<Pin[]>([]);
@@ -264,7 +266,7 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 									{!message.streaming && (
 										<div className='-mt-2 flex self-start'>
 											<CopyButton text={textOf(message).trim()} label='Copiar resposta' />
-											<Feedback messageId={message.id} initial={message.feedback ?? null} />
+											{!readOnly && <Feedback messageId={message.id} initial={message.feedback ?? null} />}
 										</div>
 									)}
 								</div>
@@ -295,10 +297,13 @@ function Conversation({ messages, typing, onAsk, className, ...props }: Props) {
 						boundary={scroller}
 						container={root}
 						onClose={() => setSelected(null)}
-						onAsk={() => {
-							onAsk?.(selected.text);
-							done();
-						}}
+						onAsk={
+							onAsk &&
+							(() => {
+								onAsk(selected.text);
+								done();
+							})
+						}
 						onPin={free && (() => pin(free.side, free.slot))}
 					/>
 				)}

@@ -44,7 +44,8 @@ function SelectionMenu({
 	/** Dentro do container da conversa, para o @6xl do "Fixar" valer. */
 	container: HTMLElement;
 	onClose: () => void;
-	onAsk: () => void;
+	/** Ausente na conversa compartilhada (só leitura). */
+	onAsk?: () => void;
 	/** Ausente com as laterais cheias. */
 	onPin?: () => void;
 }) {
@@ -73,10 +74,12 @@ function SelectionMenu({
 				className='[&_button:hover]:bg-accent w-auto flex-row gap-0.5 p-1 [&_button]:flex [&_button]:items-center [&_button]:gap-1.5 [&_button]:rounded-md [&_button]:px-2 [&_button]:py-1'
 			>
 				{/* Mantém a seleção visível ao clicar. */}
-				<button type='button' onMouseDown={(e) => e.preventDefault()} onClick={onAsk}>
-					<Icon icon='text-quote' size='sm' />
-					Perguntar sobre
-				</button>
+				{onAsk && (
+					<button type='button' onMouseDown={(e) => e.preventDefault()} onClick={onAsk}>
+						<Icon icon='text-quote' size='sm' />
+						Perguntar sobre
+					</button>
+				)}
 				{/* Só cabe nas laterais em telas largas. */}
 				{onPin && (
 					<button

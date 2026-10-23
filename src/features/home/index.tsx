@@ -11,6 +11,7 @@ import { toast } from 'sonner';
 import { unsentIds, useConversationMessages } from './api';
 import { Conversation, type Message, type Part } from './conversation';
 import { Projects } from './projects';
+import { ShareButton } from './share';
 
 const transport = new DefaultChatTransport({
 	api: `${import.meta.env.VITE_API_URL}/conversations`,
@@ -161,6 +162,11 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 				</div>
 			) : (
 				<Conversation messages={messages} typing={typing} onAsk={setQuote} className='min-h-0 flex-1' />
+			)}
+			{!empty && (
+				<div className='absolute top-3 right-4 z-10'>
+					<ShareButton conversationId={id} />
+				</div>
 			)}
 
 			{/* Com conversa, flutua sobre ela (relativo ao container, não à tela); vazio, fica no fluxo para centralizar. */}
