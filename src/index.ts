@@ -7,6 +7,7 @@ import { db } from './db';
 import { env } from './env';
 import { projects } from './projects';
 import { resetStuckSyncs } from './repos';
+import { settings } from './settings';
 import { usage } from './usage';
 
 await resetStuckSyncs();
@@ -26,5 +27,6 @@ app.route('/', auth);
 app.route('/', projects);
 app.route('/', chat);
 app.route('/', usage);
+app.route('/', settings);
 
 export default { port: env.PORT, fetch: app.fetch };

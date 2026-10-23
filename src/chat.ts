@@ -1,4 +1,3 @@
-import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import {
 	convertToModelMessages,
 	stepCountIs,
@@ -14,11 +13,10 @@ import { agentTools } from './agent';
 import { apiTools } from './apis';
 import { requireAuth, type AuthVars } from './auth';
 import { db } from './db';
-import { env } from './env';
 import type { Prisma } from './generated/prisma/client';
 import { refreshStale } from './repos';
+import { workspaceLlm } from './settings';
 
-const openrouter = createOpenRouter({ apiKey: env.OPENROUTER_API_KEY });
 const MAX_STEPS = 25;
 const MAX_TITLE = 80;
 
@@ -31,23 +29,26 @@ const body = z.object({
 	projectIds: z.array(z.string()).default([]),
 });
 
-/** Tokens and OpenRouter cost of the whole turn (every agent step). Null fields if the stream died mid-way. */
-async function turnUsage(result: {
-	totalUsage: PromiseLike<LanguageModelUsage>;
-	steps: PromiseLike<{ providerMetadata?: ProviderMetadata }[]>;
-}) {
+/** Tokens and OpenRouter cost of the whole turn (every agent step). Null fields if the stream died mid-way; null cost on other providers. */
+async function turnUsage(
+	llm: { provider: string; model: string },
+	result: {
+		totalUsage: PromiseLike<LanguageModelUsage>;
+		steps: PromiseLike<{ providerMetadata?: ProviderMetadata }[]>;
+	}
+) {
 	try {
 		const [usage, steps] = await Promise.all([result.totalUsage, result.steps]);
 		const cost = steps.reduce((sum, s) => sum + (Number((s.providerMetadata?.openrouter?.usage as { cost?: number })?.cost) || 0), 0);
 		return {
-			model: env.LLM_MODEL,
+			model: llm.model,
 			inputTokens: usage.inputTokens ?? null,
 			outputTokens: usage.outputTokens ?? null,
 			cachedTokens: usage.inputTokenDetails?.cacheReadTokens ?? null,
-			cost,
+			cost: llm.provider === 'openrouter' ? cost : null,
 		};
 	} catch {
-		return { model: env.LLM_MODEL };
+		return { model: llm.model };
 	}
 }
 
@@ -126,15 +127,16 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 				`<api id="${a.id}" titulo="${a.title.replaceAll(`"`, `'`)}" projeto="${a.project.replaceAll(`"`, `'`)}" chamavel="${a.baseUrl ? 'sim' : 'não, só documentação'}">\n<descricao>${a.description}</descricao>${a.usage ? `\n<uso>${a.usage}</uso>` : ''}\n</api>`
 		)
 		.join('\n');
+	const llm = await workspaceLlm(workspaceId);
 	const linked = projects.filter((p) => conversation.projects.some((l) => l.id === p.id)).map((p) => p.name);
 
 	const result = streamText({
-		// usage.include: OpenRouter devolve o custo (USD) de cada passo em providerMetadata.
-		model: openrouter(env.LLM_MODEL, { usage: { include: true } }),
+		model: llm.languageModel,
 		system: [
 			'Você é o Stocko, assistente que responde perguntas sobre os produtos de software do usuário lendo o código dos repositórios e consultando as APIs cadastradas nos projetos. Responda em português do Brasil.',
 			'Use as tools para encontrar a resposta antes de responder: list_repos, glob, grep e read_file no código; search_api, describe_api_operation e call_api nas APIs, quando houver. Não invente arquivos, trechos, endpoints, métricas ou comportamentos; se não encontrar, diga.',
 			'Cite as fontes no formato `owner/repo/caminho#Lx-Ly@sha` (sha curto vindo do read_file).',
+			'Quando uma imagem explicar melhor que texto (arquitetura, comunicação entre serviços, sequência de chamadas, dependências entre módulos, modelo de dados), inclua um diagrama em bloco ```mermaid (flowchart, sequenceDiagram, classDiagram ou erDiagram) montado a partir do código lido. Agrupe com subgraph, use rótulos curtos e ponha entre aspas os que tiverem caracteres especiais.',
 			'Vínculo da conversa: assim que tiver certeza de que a pergunta é sobre um ou mais projetos da lista, chame link_projects uma vez com os ids de todos os envolvidos. Em dúvida, ou se a pergunta não for sobre um projeto listado, não chame. Não repita projetos já vinculados.',
 			context ? `Projetos:\n${context}` : 'Nenhum projeto cadastrado: peça ao usuário para criar um projeto com repositórios.',
 			apiContext
@@ -180,7 +182,7 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 				where: { id },
 				data: {
 					messages: {
-						create: { role: 'assistant', parts: responseMessage.parts as Prisma.InputJsonValue, ...(await turnUsage(result)) },
+						create: { role: 'assistant', parts: responseMessage.parts as Prisma.InputJsonValue, ...(await turnUsage(llm, result)) },
 					},
 				},
 			});

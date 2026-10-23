@@ -21,7 +21,7 @@ const sorted = (map: Map<string, Sum>) => [...map].map(([key, s]) => ({ key, ...
 
 export const usage = new Hono<{ Variables: AuthVars }>();
 
-/** OpenRouter spend of the workspace's agent turns in the last DAYS days. `tz` (IANA) buckets the days. */
+/** LLM spend (cost only from OpenRouter) of the workspace's agent turns in the last DAYS days. `tz` (IANA) buckets the days. */
 usage.get('/usage', requireAuth, async (c) => {
 	let timeZone = c.req.query('tz') || 'UTC';
 	try {

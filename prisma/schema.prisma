@@ -57,6 +57,12 @@ model OAuthState {
 model Workspace {
   id            String         @id @default(cuid())
   name          String
+  /// LLM do agente: 'openrouter' (chave do env) ou 'mangaba' (chave do workspace).
+  llmProvider   String         @default("openrouter")
+  /// Null = padrão do provedor (LLM_MODEL / mangaba-titan).
+  llmModel      String?
+  /// Mangaba Router key (mr-...), AES-GCM sealed (apis.ts). Never returned by the API.
+  mangabaApiKey String?
   createdAt     DateTime       @default(now())
   members       Member[]
   installations Installation[]
@@ -213,7 +219,7 @@ model Message {
   inputTokens    Int?
   outputTokens   Int?
   cachedTokens   Int?
-  /// USD charged by OpenRouter.
+  /// USD charged by OpenRouter. Null on other providers (they don't report cost).
   cost           Decimal?     @db.Decimal(12, 6)
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

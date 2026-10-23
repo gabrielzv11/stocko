@@ -19,6 +19,11 @@ const schema = z.object({
 	// OpenRouter (openrouter.ai/keys). Model is any OpenRouter slug; avoid `:free` with client code.
 	OPENROUTER_API_KEY: z.string().min(1),
 	LLM_MODEL: z.string().default('anthropic/claude-sonnet-5.5'),
+	// Mangaba Router (OpenAI-compatible). Key is per workspace (Settings), so only the base URL lives here.
+	MANGABA_BASE_URL: z
+		.url()
+		.default('https://mangabarouter.store/v1')
+		.transform((s) => s.replace(/\/+$/, '')),
 	// Shallow clones the agent searches. Railway: volume mounted at /data/repos.
 	REPOS_DIR: z.string().default('./data/repos'),
 	MAX_REPO_SIZE_MB: z.coerce.number().default(500),
