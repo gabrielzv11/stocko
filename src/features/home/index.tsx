@@ -34,6 +34,7 @@ type ToolInput = {
 	ref?: string;
 	base?: string;
 	head?: string;
+	query?: string;
 };
 
 function stepLabel(name: string, input: ToolInput = {}) {
@@ -53,6 +54,10 @@ function stepLabel(name: string, input: ToolInput = {}) {
 			return `Lendo o histórico${input.path ? ` de ${input.path}` : ''}${repo}`;
 		case 'diff_refs':
 			return `Comparando ${input.base ?? '…'}...${input.head ?? '…'}${repo}`;
+		case 'search_docs':
+			return `Buscando "${input.query ?? ''}" nos docs e no Jira`;
+		case 'read_doc':
+			return 'Lendo doc';
 		default:
 			return name;
 	}

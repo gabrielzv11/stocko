@@ -7,6 +7,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useProjects } from '../api';
 import { ProjectApis } from '../projectApis';
 import { ProjectDialog } from '../projectDialog';
+import { ProjectKnowledge } from '../projectKnowledge';
 import { ProjectRepos } from '../projectRepos';
 
 export default function ProjectPage() {
@@ -59,6 +60,7 @@ export default function ProjectPage() {
 				/>
 			)}
 			{project && <ProjectRepos project={project} />}
+			{project && <ProjectKnowledge project={project} />}
 			{project && <ProjectApis project={project} />}
 		</main>
 	);

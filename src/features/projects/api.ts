@@ -37,6 +37,26 @@ export type ProjectApi = {
 	hasAuth: boolean;
 };
 
+// Doc enviado ou consulta do Jira; title = título do doc ou a JQL.
+export type KnowledgeSource = {
+	id: string;
+	type: 'doc' | 'jira';
+	title: string;
+	baseUrl: string | null;
+	status: 'syncing' | 'ready' | 'error' | null;
+	error: string | null;
+	syncedAt: string | null;
+	chunks: number;
+};
+
+export const useKnowledge = (projectId: string) =>
+	useQuery({
+		queryKey: ['projects', projectId, 'knowledge'],
+		queryFn: () => api.get<KnowledgeSource[]>(`/projects/${projectId}/knowledge`).then((r) => r.data),
+		// Acompanha o sync do Jira até terminar.
+		refetchInterval: (query) => (query.state.data?.some((s) => s.status === 'syncing') ? 3000 : false),
+	});
+
 export const useProjectApis = (projectId: string) =>
 	useQuery({
 		queryKey: ['projects', projectId, 'apis'],
