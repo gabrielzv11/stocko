@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { installationToken } from './client';
 import { db } from './db';
@@ -31,20 +31,40 @@ export async function git(dir: string, args: string[], token?: string) {
 	return out;
 }
 
-// ponytail: in-process dedupe (1 réplica); Inngest (concorrência 1 por repo, retry) quando houver webhooks/cron.
+// ponytail: in-process dedupe (1 réplica); Inngest (concorrência 1 por repo, retry) se houver várias réplicas.
 const inflight = new Map<string, Promise<void>>();
+const again = new Set<string>();
 
 /** Observed branches a repo can have (cascade in the agent's tools). */
 export const MAX_BRANCHES = 5;
 
-/** Fetch every observed branch into the repo's bare repo. Concurrent calls share one run. */
+/**
+ * Fetch every observed branch into the repo's bare repo. One run per repo at a time; a call during a run
+ * (push, new branch) queues one more pass, so the state requested now isn't lost. Never rejects.
+ */
 export function syncRepo(repositoryId: string): Promise<void> {
-	let pending = inflight.get(repositoryId);
-	if (!pending) {
-		pending = doSync(repositoryId).finally(() => inflight.delete(repositoryId));
-		inflight.set(repositoryId, pending);
+	const running = inflight.get(repositoryId);
+	if (running) {
+		again.add(repositoryId);
+		return running;
 	}
+	const pending = (async () => {
+		do {
+			again.delete(repositoryId);
+			// Repo removed meanwhile (webhook) → findUniqueOrThrow throws; callers fire and forget.
+			await doSync(repositoryId).catch((e) => console.error(`[sync] ${repositoryId}:`, e));
+		} while (again.has(repositoryId));
+	})().finally(() => inflight.delete(repositoryId));
+	inflight.set(repositoryId, pending);
 	return pending;
+}
+
+/** Deletes the repository (cascade: branches, project sources) and its clone and Zoekt shards. */
+export async function removeRepo(repositoryId: string) {
+	await db.repository.deleteMany({ where: { id: repositoryId } });
+	await rm(repoDir(repositoryId), { recursive: true, force: true });
+	const shards = await readdir(zoektDir).catch(() => []);
+	await Promise.all(shards.filter((f) => f.startsWith(`${repositoryId}_`)).map((f) => rm(path.join(zoektDir, f), { force: true })));
 }
 
 /** Resolves when the running sync (if any) ends. Tools only need it before the first one. */
