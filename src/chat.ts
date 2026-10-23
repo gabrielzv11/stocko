@@ -13,12 +13,31 @@ import { agentTools } from './agent';
 import { apiTools } from './apis';
 import { requireAuth, type AuthVars } from './auth';
 import { db } from './db';
+import { env } from './env';
 import type { Prisma } from './generated/prisma/client';
 import { refreshStale } from './repos';
 import { workspaceLlm } from './settings';
 
 const MAX_STEPS = 25;
 const MAX_TITLE = 80;
+const MAX_MESSAGES_PER_MINUTE = 10;
+
+/** Why the workspace can't ask right now, or null. Counts what's already in the DB: no in-memory state, survives restarts. */
+async function limitError(workspaceId: string) {
+	const inWorkspace = { conversation: { workspaceId } };
+	const [recent, spent] = await Promise.all([
+		db.message.count({ where: { ...inWorkspace, role: 'user', createdAt: { gte: new Date(Date.now() - 60_000) } } }),
+		db.message.aggregate({
+			_sum: { cost: true },
+			where: { ...inWorkspace, role: 'assistant', createdAt: { gte: new Date(Date.now() - 86_400_000) } },
+		}),
+	]);
+	if (recent >= MAX_MESSAGES_PER_MINUTE) return 'Muitas perguntas seguidas; aguarde um minuto.';
+	// ponytail: o custo só entra no fim do turno; turnos simultâneos podem passar um pouco do teto.
+	if (Number(spent._sum.cost ?? 0) >= env.MAX_DAILY_COST_USD)
+		return `Limite de gasto de US$ ${env.MAX_DAILY_COST_USD} nas últimas 24h atingido; tente mais tarde.`;
+	return null;
+}
 
 const body = z.object({
 	// Só a pergunta nova, só texto: o histórico vem do banco, então o cliente não consegue reescrevê-lo.
@@ -92,6 +111,9 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 	// Anti-IDOR: id de conversa de outro workspace parece inexistente.
 	const owner = await db.conversation.findUnique({ where: { id }, select: { workspaceId: true } });
 	if (owner && owner.workspaceId !== workspaceId) return c.json({ error: 'not_found' }, 404);
+
+	const limited = await limitError(workspaceId);
+	if (limited) return c.json({ error: 'rate_limited', message: limited }, 429);
 
 	// Pergunta salva antes de rodar o agente: não se perde se o modelo falhar.
 	const newMessage = { role: 'user', parts: message.parts };
