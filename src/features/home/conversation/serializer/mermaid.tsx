@@ -55,12 +55,15 @@ function PanZoom({
 	fullscreen,
 	className,
 	children,
+	header,
 	onDoubleClick,
 }: {
 	svg: string;
 	fullscreen?: boolean;
 	className?: string;
 	children?: React.ReactNode;
+	/** Põe as ferramentas no cabeçalho do bloco; sem ele, ficam flutuando embaixo. */
+	header?: (tools: React.ReactNode) => React.ReactNode;
 	onDoubleClick?: () => void;
 }) {
 	const ref = useRef<HTMLDivElement>(null);
@@ -85,50 +88,65 @@ function PanZoom({
 		if (el) setView((v) => zoomAt(v, factor, el.clientWidth / 2, el.clientHeight / 2));
 	};
 
-	const tools = (position: string) => (
-		<div className={cn('border-border bg-card/90 absolute right-2 flex gap-0.5 rounded-lg border p-0.5 backdrop-blur', position)}>
+	const tools = (
+		<>
 			<Tool icon='zoom-in' label='Aproximar' onClick={() => zoom(1.25)} />
 			<Tool icon='zoom-out' label='Afastar' onClick={() => zoom(0.8)} />
 			<Tool icon='rotate-ccw' label='Centralizar' onClick={() => setView(START)} />
 			{children}
-		</div>
+		</>
 	);
 
 	return (
-		<div className={cn('relative overflow-hidden', className)}>
-			<div
-				ref={ref}
-				className={cn('h-full cursor-grab select-none active:cursor-grabbing', fullscreen && 'touch-none')}
-				onPointerDown={(e) => {
-					e.currentTarget.setPointerCapture(e.pointerId);
-					drag.current = { x: e.clientX - view.x, y: e.clientY - view.y };
-				}}
-				onPointerMove={(e) => {
-					const start = drag.current;
-					if (start) setView((v) => ({ ...v, x: e.clientX - start.x, y: e.clientY - start.y }));
-				}}
-				onPointerUp={() => (drag.current = null)}
-				onPointerCancel={() => (drag.current = null)}
-				onDoubleClick={onDoubleClick}
-			>
+		<>
+			{header?.(tools)}
+			<div className={cn('relative overflow-hidden', className)}>
 				<div
-					className={cn(
-						'flex origin-top-left items-center justify-center p-4',
-						fullscreen ? 'size-full [&_svg]:size-full [&_svg]:max-w-none!' : '[&_svg]:h-auto',
-					)}
-					style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
-					dangerouslySetInnerHTML={{ __html: svg }}
-				/>
+					ref={ref}
+					className={cn('h-full cursor-grab select-none active:cursor-grabbing', fullscreen && 'touch-none')}
+					onPointerDown={(e) => {
+						e.currentTarget.setPointerCapture(e.pointerId);
+						drag.current = { x: e.clientX - view.x, y: e.clientY - view.y };
+					}}
+					onPointerMove={(e) => {
+						const start = drag.current;
+						if (start) setView((v) => ({ ...v, x: e.clientX - start.x, y: e.clientY - start.y }));
+					}}
+					onPointerUp={() => (drag.current = null)}
+					onPointerCancel={() => (drag.current = null)}
+					onDoubleClick={onDoubleClick}
+				>
+					<div
+						className={cn(
+							'flex origin-top-left items-center justify-center p-4',
+							fullscreen ? 'size-full [&_svg]:size-full [&_svg]:max-w-none!' : '[&_svg]:h-auto',
+						)}
+						style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.k})` }}
+						dangerouslySetInnerHTML={{ __html: svg }}
+					/>
+				</div>
+				{/* No dialog o topo é do botão de fechar. */}
+				{!header && (
+					<div className='border-border bg-card/90 absolute right-2 bottom-2 flex gap-0.5 rounded-lg border p-0.5 backdrop-blur'>
+						{tools}
+					</div>
+				)}
 			</div>
-			{/* Diagrama alto: atalhos em cima e embaixo. No dialog cabe tudo e o topo é do botão de fechar. */}
-			{!fullscreen && tools('top-2')}
-			{tools('bottom-2')}
-		</div>
+		</>
 	);
 }
 
 /** Diagrama do bloco ```mermaid; mostra `fallback` (o código) enquanto carrega ou se a sintaxe for inválida. */
-export function MermaidDiagram({ code, fallback }: { code: string; fallback: React.ReactNode }) {
+export function MermaidDiagram({
+	code,
+	header,
+	fallback,
+}: {
+	code: string;
+	/** Cabeçalho do bloco, que recebe as ferramentas do diagrama. */
+	header: (tools: React.ReactNode) => React.ReactNode;
+	fallback: React.ReactNode;
+}) {
 	const id = `mermaid-${useId().replace(/\W/g, '')}`;
 	const [svg, setSvg] = useState<string>();
 	const [expanded, setExpanded] = useState(false);
@@ -149,7 +167,7 @@ export function MermaidDiagram({ code, fallback }: { code: string; fallback: Rea
 	if (!svg) return fallback;
 	return (
 		<>
-			<PanZoom svg={svg} onDoubleClick={() => setExpanded(true)}>
+			<PanZoom svg={svg} header={header} onDoubleClick={() => setExpanded(true)}>
 				<Tool icon='maximize-2' label='Expandir (ou duplo clique)' onClick={() => setExpanded(true)} />
 			</PanZoom>
 			<Dialog open={expanded} onClose={() => setExpanded(false)} closeButton className='flex h-[85vh] w-[80vw] max-w-none flex-col'>

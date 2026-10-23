@@ -114,16 +114,25 @@ function BlockView({ block, streaming }: { block: Block; streaming?: boolean }) 
 					<code>{block.text}</code>
 				</pre>
 			);
+			// Sticky: bloco alto rola e as ferramentas ficam à mão.
+			const header = (tools?: React.ReactNode) => (
+				<div className='text-muted-foreground bg-card sticky top-0 z-10 flex items-center justify-end gap-0.5 py-1 pr-1 pl-3 text-xs'>
+					{tools}
+					<CopyButton text={block.text} label='Copiar código' />
+				</div>
+			);
+			const plain = (
+				<>
+					{header()}
+					{source}
+				</>
+			);
 			return (
 				// data-block: clique seleciona o bloco inteiro (ver Conversation), citando o código-fonte.
-				<div data-block={block.text} className={`border-border bg-card overflow-hidden rounded-xl border ${SELECTABLE}`}>
-					<div className='text-muted-foreground flex items-center justify-between py-1 pr-1 pl-3 text-xs'>
-						{/* <span className='font-mono'>{block.lang || 'código'}</span> */}
-						<div></div>
-						<CopyButton text={block.text} label='Copiar código' />
-					</div>
+				// overflow-clip (não hidden): hidden vira container de rolagem e anula o sticky do cabeçalho.
+				<div data-block={block.text} className={`border-border bg-card overflow-clip rounded-xl border ${SELECTABLE}`}>
 					{/* Só renderiza com o bloco fechado: durante o streaming o código está incompleto. */}
-					{block.lang === 'mermaid' && block.closed ? <MermaidDiagram code={block.text} fallback={source} /> : source}
+					{block.lang === 'mermaid' && block.closed ? <MermaidDiagram code={block.text} header={header} fallback={plain} /> : plain}
 				</div>
 			);
 		}

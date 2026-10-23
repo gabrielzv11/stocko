@@ -101,7 +101,8 @@ function SelectionMenu({
 }
 
 function jump(range: Range) {
-	const node = range.startContainer;
+	// Bloco fixado (selectNode): o container é o pai e o offset aponta o próprio bloco.
+	const node = range.startContainer.childNodes[range.startOffset] ?? range.startContainer;
 	(node instanceof Element ? node : node.parentElement)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
 	getSelection()?.removeAllRanges();
 	getSelection()?.addRange(range);
