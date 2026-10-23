@@ -238,6 +238,8 @@ model Conversation {
   pinned                   Boolean   @default(false)
   summary                  String?
   summarizedUntilMessageId String?
+  /// Public read-only link (/shared/:token, answers' text only). Null = not shared; revoking clears it.
+  shareToken               String?   @unique
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)

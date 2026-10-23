@@ -11,7 +11,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import { agentTools } from './agent';
 import { apiTools } from './apis';
-import { requireAuth, type AuthVars } from './auth';
+import { randomToken, requireAuth, type AuthVars } from './auth';
 import { db } from './db';
 import { env } from './env';
 import { knowledgeTools, refreshStaleSources } from './knowledge';
@@ -107,6 +107,43 @@ chat.get('/conversations/:id', requireAuth, async (c) => {
 	// UIMessage.metadata: the front's useChat keeps it per message.
 	const messages = conversation.messages.map(({ feedback, ...m }) => ({ ...m, metadata: { feedback } }));
 	return c.json({ ...conversation, messages });
+});
+
+// ---------- share: public read-only link ----------
+
+const ownConversation = (workspaceId: string, id: string) => db.conversation.findFirst({ where: { id, workspaceId }, select: { id: true, shareToken: true } });
+
+chat.get('/conversations/:id/share', requireAuth, async (c) => {
+	const conversation = await ownConversation(c.var.workspaceId, c.req.param('id'));
+	return conversation ? c.json({ token: conversation.shareToken }) : c.json({ error: 'not_found' }, 404);
+});
+
+chat.post('/conversations/:id/share', requireAuth, async (c) => {
+	const conversation = await ownConversation(c.var.workspaceId, c.req.param('id'));
+	if (!conversation) return c.json({ error: 'not_found' }, 404);
+	const token = conversation.shareToken ?? randomToken();
+	await db.conversation.update({ where: { id: conversation.id }, data: { shareToken: token } });
+	return c.json({ token });
+});
+
+chat.delete('/conversations/:id/share', requireAuth, async (c) => {
+	const { count } = await db.conversation.updateMany({ where: { id: c.req.param('id'), workspaceId: c.var.workspaceId }, data: { shareToken: null } });
+	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
+});
+
+// No auth: anyone with the token. Only the text of questions and answers (citations included);
+// tool calls and their raw output (whole files, API responses) stay private.
+chat.get('/shared/:token', async (c) => {
+	const conversation = await db.conversation.findUnique({
+		where: { shareToken: c.req.param('token') },
+		select: { title: true, messages: { orderBy: { createdAt: 'asc' }, select: { id: true, role: true, parts: true } } },
+	});
+	if (!conversation) return c.json({ error: 'not_found' }, 404);
+	const messages = conversation.messages.map((m) => ({
+		...m,
+		parts: (m.parts as { type: string; text?: string }[]).filter((p) => p.type === 'text').map((p) => ({ type: 'text', text: p.text ?? '' })),
+	}));
+	return c.json({ title: conversation.title, messages });
 });
 
 // 👍/👎 on an answer; null clears it.

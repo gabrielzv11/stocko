@@ -9,7 +9,7 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 
 export type AuthVars = { userId: string; workspaceId: string; role: string; tokenHash: string };
 
-const randomToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
+export const randomToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 export const sha256 = (s: string) => new Bun.CryptoHasher('sha256').update(s).digest('hex');
 
 // Single entry point for auth; a host JWT branch can be added here later.
