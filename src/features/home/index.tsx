@@ -127,6 +127,8 @@ function Chat({ id, initialMessages }: { id: string; initialMessages: UIMessage[
 				role: m.role === 'user' ? ('user' as const) : ('assistant' as const),
 				parts: toParts(m, streaming),
 				streaming,
+				// GET /conversations/:id põe o 👍/👎 salvo em metadata.
+				feedback: (m.metadata as { feedback?: 1 | -1 | null } | undefined)?.feedback,
 			};
 		})
 		// Assistente ainda sem nada: some, e o "digitando" continua visível.
