@@ -19,17 +19,24 @@ function key() {
 	return Buffer.from(env.SECRETS_KEY, 'base64');
 }
 
-/** AES-256-GCM; "iv.tag.data" in base64. */
+// ponytail: só v1 (= SECRETS_KEY). Ao rotacionar: chave nova como v2, unseal escolhe pela versão, regravar os segredos.
+const KEY_VERSION = 'v1';
+
+/** AES-256-GCM; "v1.iv.tag.data" in base64. The version names the key, so SECRETS_KEY can be rotated. */
 export function seal(text: string) {
 	const iv = randomBytes(12);
 	const c = createCipheriv('aes-256-gcm', key(), iv);
 	const data = Buffer.concat([c.update(text, 'utf8'), c.final()]);
-	return [iv, c.getAuthTag(), data].map((b) => b.toString('base64')).join('.');
+	return [KEY_VERSION, ...[iv, c.getAuthTag(), data].map((b) => b.toString('base64'))].join('.');
 }
 
 export function unseal(sealed: string) {
-	const [iv, tag, data] = sealed.split('.').map((b) => Buffer.from(b, 'base64'));
-	if (!iv || !tag || !data) throw new Error('segredo corrompido');
+	const parts = sealed.split('.');
+	// No prefix: sealed before versioning, same key as v1.
+	const version = parts.length === 4 ? parts.shift() : KEY_VERSION;
+	if (version !== KEY_VERSION) throw new Error(`versão de segredo desconhecida: ${version}`);
+	const [iv, tag, data] = parts.map((b) => Buffer.from(b, 'base64'));
+	if (parts.length !== 3 || !iv || !tag || !data) throw new Error('segredo corrompido');
 	const d = createDecipheriv('aes-256-gcm', key(), iv);
 	d.setAuthTag(tag);
 	return Buffer.concat([d.update(data), d.final()]).toString('utf8');

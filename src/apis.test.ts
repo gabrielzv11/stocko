@@ -40,6 +40,10 @@ test('seal/unseal: roundtrip, ciphertext hides the secret', () => {
 	const sealed = seal('Authorization: Bearer abc');
 	expect(sealed).not.toContain('abc');
 	expect(unseal(sealed)).toBe('Authorization: Bearer abc');
+	// Versioned; secrets sealed before the prefix still open; unknown versions don't.
+	expect(sealed.startsWith('v1.')).toBe(true);
+	expect(unseal(sealed.slice(3))).toBe('Authorization: Bearer abc');
+	expect(() => unseal(`v2.${sealed.slice(3)}`)).toThrow('versão');
 });
 
 test('readCapped: stops an endless body just past the limit', async () => {
