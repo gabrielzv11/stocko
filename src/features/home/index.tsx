@@ -31,10 +31,13 @@ type ToolInput = {
 	path?: string;
 	start?: number;
 	end?: number;
+	ref?: string;
+	base?: string;
+	head?: string;
 };
 
 function stepLabel(name: string, input: ToolInput = {}) {
-	const repo = input.repo ? ` em ${input.repo}` : '';
+	const repo = input.repo ? ` em ${input.repo}${input.ref ? `@${input.ref}` : ''}` : '';
 	switch (name) {
 		case 'list_repos':
 			return 'Listando repositórios';
@@ -46,6 +49,10 @@ function stepLabel(name: string, input: ToolInput = {}) {
 			return `Buscando "${input.regex ?? ''}"${input.glob ? ` (${input.glob})` : ''}${repo}`;
 		case 'read_file':
 			return `Lendo ${input.path ?? 'arquivo'}${input.start ? ` (linhas ${input.start}–${input.end ?? '…'})` : ''}${repo}`;
+		case 'list_commits':
+			return `Lendo o histórico${input.path ? ` de ${input.path}` : ''}${repo}`;
+		case 'diff_refs':
+			return `Comparando ${input.base ?? '…'}...${input.head ?? '…'}${repo}`;
 		default:
 			return name;
 	}
