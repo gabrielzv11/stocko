@@ -6,6 +6,7 @@ import { auth } from './auth';
 import { chat } from './chat';
 import { db } from './db';
 import { env } from './env';
+import { knowledge } from './knowledge';
 import { projects } from './projects';
 import { resetStuckSyncs } from './repos';
 import { settings } from './settings';
@@ -23,9 +24,9 @@ app.use(cors({ origin: env.FRONTEND_URL }));
 
 const tooLarge = (c: Context) => c.json({ error: 'payload_too_large' }, 413);
 const small = bodyLimit({ maxSize: 1024 * 1024, onError: tooLarge });
-// Corpos grandes: spec OpenAPI (até 10 MB de texto, folga para os escapes do JSON) e webhook de push com muitos commits.
+// Corpos grandes: spec OpenAPI (até 10 MB de texto, folga para os escapes do JSON), docs do projeto (2 MB) e webhook de push com muitos commits.
 const large = bodyLimit({ maxSize: 16 * 1024 * 1024, onError: tooLarge });
-app.use((c, next) => (c.req.method === 'POST' && /\/apis$|^\/webhooks\//.test(c.req.path) ? large : small)(c, next));
+app.use((c, next) => (c.req.method === 'POST' && /\/(apis|docs)$|^\/webhooks\//.test(c.req.path) ? large : small)(c, next));
 
 app.get('/health', async (c) => {
 	await db.$queryRaw`SELECT 1`;
@@ -34,6 +35,7 @@ app.get('/health', async (c) => {
 
 app.route('/', auth);
 app.route('/', projects);
+app.route('/', knowledge);
 app.route('/', chat);
 app.route('/', usage);
 app.route('/', settings);
