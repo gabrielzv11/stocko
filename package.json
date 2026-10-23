@@ -6,6 +6,7 @@
 	"packageManager": "pnpm@10.15.0",
 	"scripts": {
 		"dev": "vite",
+		"dev:mf": "vite --mode mf",
 		"start": "vite preview --port 5003 --strictPort",
 		"build": "tsc -b && vite build",
 		"lint": "prettier --write src",

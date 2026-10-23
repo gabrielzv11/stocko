@@ -6,6 +6,8 @@ import { defineConfig, loadEnv } from 'vite';
 
 export default defineConfig(({ mode, command }) => {
 	const env = loadEnv(mode, process.cwd(), '');
+	// Federation só no build ou em `dev:mf` (testar com host); `dev` puro roda standalone e sobe rápido.
+	const withFederation = command === 'build' || mode === 'mf';
 
 	return {
 		base: command === 'build' && env.VITE_PUBLIC_URL ? `${env.VITE_PUBLIC_URL}/` : '/',
@@ -26,7 +28,7 @@ export default defineConfig(({ mode, command }) => {
 		plugins: [
 			react(),
 			tailwindcss(),
-			federation({
+			withFederation && federation({
 				name: 'stocko',
 				manifest: true,
 				exposes: {
