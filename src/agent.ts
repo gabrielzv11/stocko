@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { readdir } from 'node:fs/promises';
 import { z } from 'zod';
 import { db } from './db';
+import { installationOctokit } from './client';
 import { env } from './env';
 import { git, repoDir, run, waitForSync, zoektDir } from './repos';
 
@@ -12,6 +13,8 @@ const MAX_GREP_BYTES = 16 * 1024;
 const MAX_READ_LINES = 300;
 const MAX_READ_BYTES = 2 * 1024 * 1024;
 const GREP_TIMEOUT_MS = 10_000;
+const MAX_COMMITS = 30;
+const MAX_DIFF_BYTES = 16 * 1024;
 
 /** Glob → anchored regex, same semantics as git's :(glob) pathspec. No "/" → any depth, like ripgrep's --glob. */
 export function globToRegex(glob: string) {
@@ -74,23 +77,58 @@ type Repo = { id: string; fullName: string };
  * so the model can correct itself instead of the turn failing.
  */
 export function agentTools(repos: Repo[]) {
-	// SHA fixed on first use, for the whole turn: every tool and citation sees the same tree, even if a sync lands mid-turn.
-	const pinned = new Map<string, string>();
+	// Branch SHAs fixed on first use, for the whole turn: every tool and citation sees the same trees, even if a sync lands mid-turn.
+	const pinned = new Map<string, { name: string; sha: string }[]>();
 
-	/** Looks up the repo and its synced SHA; waits only when the first sync is still running. */
-	async function open(fullName: string) {
+	function find(fullName: string) {
 		const repo = repos.find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
 		if (!repo) throw new Error(`repo desconhecido: ${fullName}. Use list_repos.`);
+		return repo;
+	}
+
+	/** Octokit for the repo's installation: the shallow clone has no history, GitHub has. */
+	async function github(fullName: string) {
+		const { id, fullName: name } = find(fullName);
+		const { installation } = await db.repository.findUniqueOrThrow({ where: { id }, include: { installation: true } });
+		const [owner = '', repo = ''] = name.split('/');
+		return { octokit: installationOctokit(Number(installation.githubInstallationId)), owner, repo };
+	}
+
+	/**
+	 * Looks up the repo and the tree to read: `ref` = observed branch or sha; none = highest-priority branch (cascade top).
+	 * Waits only when the first sync is still running.
+	 */
+	async function open(fullName: string, ref?: string) {
+		const repo = find(fullName);
+		const root = repoDir(repo.id);
 		if (!pinned.has(repo.id)) {
 			// Any status: during a re-sync (or after a failed one) the last synced SHA is still in the bare repo.
 			const synced = () =>
-				db.repoBranch.findFirst({ where: { repositoryId: repo.id, lastSyncedSha: { not: null } }, orderBy: { priority: 'asc' } });
-			const branch = (await synced()) ?? (await waitForSync(repo.id).then(synced));
-			if (!branch?.lastSyncedSha) throw new Error(`${repo.fullName} ainda não foi sincronizado; tente de novo em instantes.`);
-			pinned.set(repo.id, branch.lastSyncedSha);
+				db.repoBranch.findMany({ where: { repositoryId: repo.id, lastSyncedSha: { not: null } }, orderBy: { priority: 'asc' } });
+			let rows = await synced();
+			if (!rows.length) rows = await waitForSync(repo.id).then(synced);
+			if (!rows.length) throw new Error(`${repo.fullName} ainda não foi sincronizado; tente de novo em instantes.`);
+			pinned.set(
+				repo.id,
+				rows.map((b) => ({ name: b.name, sha: b.lastSyncedSha! }))
+			);
 		}
-		return { id: repo.id, root: repoDir(repo.id), sha: pinned.get(repo.id)! };
+		const branches = pinned.get(repo.id)!;
+		const branch = ref ? branches.find((b) => b.name === ref) : branches[0];
+		const base = { id: repo.id, root, top: branch === branches[0] };
+		if (branch) {
+			const others = branches.filter((b) => b !== branch).map((b) => b.name);
+			// Cascade hint for "not found": the agent looks in the next branches and says where it came from.
+			const missing = (what: string) => `${what} em ${branch.name}${others.length ? `; outras branches, em ordem: ${others.join(', ')} (use ref)` : ''}`;
+			return { ...base, sha: branch.sha, branch: branch.name, missing };
+		}
+		// A sha only resolves if the shallow fetches brought it (tips of observed branches, current or past).
+		const sha = /^[0-9a-f]{7,40}$/i.test(ref!) ? (await git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]).catch(() => '')).trim() : '';
+		if (!sha) throw new Error(`ref desconhecida: ${ref}. Branches sincronizadas, em ordem de prioridade: ${branches.map((b) => b.name).join(', ')}`);
+		return { ...base, top: false, sha, branch: null, missing: (what: string) => `${what} em ${sha.slice(0, 7)}` };
 	}
+
+	const ref = z.string().optional().describe('branch observada ou sha; padrão: a branch de maior prioridade');
 
 	const safe =
 		<I>(fn: (input: I) => Promise<string>) =>
@@ -99,14 +137,16 @@ export function agentTools(repos: Repo[]) {
 
 	return {
 		list_repos: tool({
-			description: 'Lista os repositórios disponíveis, com branch, SHA sincronizado e status.',
+			description: 'Lista os repositórios disponíveis com as branches observadas em ordem de prioridade, SHA sincronizado e status.',
 			inputSchema: z.object({}),
 			execute: async () => {
-				const branches = await db.repoBranch.findMany({ where: { repositoryId: { in: repos.map((r) => r.id) } } });
+				const branches = await db.repoBranch.findMany({ where: { repositoryId: { in: repos.map((r) => r.id) } }, orderBy: { priority: 'asc' } });
 				return repos
 					.map((r) => {
-						const b = branches.find((b) => b.repositoryId === r.id);
-						return `${r.fullName} — ${b ? `${b.name}@${b.lastSyncedSha?.slice(0, 7) ?? '?'} (${b.status}${b.error ? `: ${b.error}` : ''})` : 'não sincronizado'}`;
+						const own = branches
+							.filter((b) => b.repositoryId === r.id)
+							.map((b) => `${b.name}@${b.lastSyncedSha?.slice(0, 7) ?? '?'} (${b.status}${b.error ? `: ${b.error}` : ''})`);
+						return `${r.fullName} — ${own.join(' → ') || 'não sincronizado'}`;
 					})
 					.join('\n');
 			},
@@ -114,13 +154,13 @@ export function agentTools(repos: Repo[]) {
 
 		glob: tool({
 			description: `Lista arquivos do repo por padrão glob (ex.: "src/**/*.ts"). Máx. ${MAX_GLOB} caminhos.`,
-			inputSchema: z.object({ repo: z.string().describe('owner/name'), pattern: z.string() }),
-			execute: safe(async ({ repo, pattern }) => {
-				const { root, sha } = await open(repo);
+			inputSchema: z.object({ repo: z.string().describe('owner/name'), pattern: z.string(), ref }),
+			execute: safe(async ({ repo, pattern, ref }) => {
+				const { root, sha, missing } = await open(repo, ref);
 				const matcher = new Bun.Glob(pattern);
 				const paths = (await git(root, ['ls-tree', '-r', '-z', '--name-only', sha])).split('\0').filter((p) => p && matcher.match(p));
 				if (paths.length > MAX_GLOB) return paths.slice(0, MAX_GLOB).join('\n') + TRUNCATED;
-				return paths.join('\n') || 'nenhum arquivo';
+				return paths.join('\n') || missing('nenhum arquivo');
 			}),
 		}),
 
@@ -133,12 +173,14 @@ export function agentTools(repos: Repo[]) {
 				repo: z.string().describe('owner/name'),
 				regex: z.string(),
 				glob: z.string().optional().describe('filtra arquivos, ex.: "*.tsx"'),
+				ref,
 			}),
-			execute: safe(async ({ repo, regex, glob }) => {
-				const { id, root, sha } = await open(repo);
-				const zoekt = env.GREP_BACKEND === 'zoekt' ? await zoektGrep(id, regex, glob) : null;
+			execute: safe(async ({ repo, regex, glob, ref }) => {
+				const { id, root, sha, top, missing } = await open(repo, ref);
+				// Zoekt only indexes the top branch.
+				const zoekt = env.GREP_BACKEND === 'zoekt' && top ? await zoektGrep(id, regex, glob) : null;
 				const out = zoekt ?? (await gitGrep(root, sha, regex, glob));
-				if (!out.trim()) return 'nenhum resultado';
+				if (!out.trim()) return missing('nenhum resultado');
 
 				const lines = out
 					.split('\n')
@@ -157,16 +199,17 @@ export function agentTools(repos: Repo[]) {
 				path: z.string(),
 				start: z.number().int().min(1).optional(),
 				end: z.number().int().min(1).optional(),
+				ref,
 			}),
-			execute: safe(async ({ repo, path: p, start = 1, end }) => {
-				const { root, sha } = await open(repo);
+			execute: safe(async ({ repo, path: p, start = 1, end, ref }) => {
+				const { root, sha, branch, missing } = await open(repo, ref);
 				// Object lookup in the SHA's tree: "../", absolute paths and symlinks can't reach the host filesystem.
 				const rel = p.replaceAll('\\', '/').replace(/^\.?\/+/, '');
 				// "<mode> <type> <object> <size>\t<path>\0" (-z: path unquoted); empty when the path isn't in the tree.
 				const entry = await git(root, ['--literal-pathspecs', 'ls-tree', '-l', '-z', sha, '--', rel]).catch(() => '');
 				const [, type, object, size] = entry.split(/\s+/);
 				if (type === 'tree') throw new Error(`${p} é um diretório; use glob`);
-				if (type !== 'blob' || !entry.endsWith(`\t${rel}\0`)) throw new Error(`arquivo não encontrado: ${p}`);
+				if (type !== 'blob' || !entry.endsWith(`\t${rel}\0`)) throw new Error(missing(`arquivo não encontrado: ${p}`));
 				if (Number(size) > MAX_READ_BYTES) throw new Error('arquivo grande demais; use grep');
 
 				const lines = (await git(root, ['cat-file', 'blob', object!])).split('\n');
@@ -176,7 +219,50 @@ export function agentTools(repos: Repo[]) {
 					.map((l, i) => `${start + i}\t${l}`)
 					.join('\n');
 				const more = last < lines.length ? `\n[linhas ${start}-${last} de ${lines.length}; peça start=${last + 1}]` : '';
-				return `${repo}/${p}@${sha.slice(0, 7)}\n${body}${more}`;
+				return `${repo}/${p}@${sha.slice(0, 7)}${branch ? ` · branch ${branch}` : ''}\n${body}${more}`;
+			}),
+		}),
+
+		list_commits: tool({
+			description: `Histórico de commits (API do GitHub), mais recentes primeiro: sha, data, autor e mensagem. Filtra por path e por período. Máx. ${MAX_COMMITS}.`,
+			inputSchema: z.object({
+				repo: z.string().describe('owner/name'),
+				path: z.string().optional().describe('arquivo ou diretório'),
+				ref: z.string().optional().describe('branch ou sha; padrão: o SHA que as outras tools leem'),
+				since: z.string().optional().describe('ISO 8601, ex.: 2026-10-01T00:00:00Z'),
+				until: z.string().optional().describe('ISO 8601'),
+			}),
+			execute: safe(async ({ repo, path: p, ref, since, until }) => {
+				const { octokit, owner, repo: name } = await github(repo);
+				const sha = ref ?? (await open(repo)).sha;
+				const { data } = await octokit.rest.repos.listCommits({ owner, repo: name, sha, path: p, since, until, per_page: MAX_COMMITS });
+				const line = (c: (typeof data)[number]) =>
+					`${c.sha.slice(0, 7)} ${c.commit.author?.date?.slice(0, 10) ?? '?'} ${c.author?.login ?? c.commit.author?.name ?? '?'} — ${c.commit.message.split('\n')[0]}`;
+				return data.map(line).join('\n') || 'nenhum commit';
+			}),
+		}),
+
+		diff_refs: tool({
+			description:
+				'Diferença entre dois refs (branch, tag ou sha) via API do GitHub: commits de base até head, arquivos alterados e patches. Com list_commits responde "o que mudou desde X". path filtra arquivos pelo prefixo.',
+			inputSchema: z.object({
+				repo: z.string().describe('owner/name'),
+				base: z.string(),
+				head: z.string(),
+				path: z.string().optional(),
+			}),
+			execute: safe(async ({ repo, base, head, path: p }) => {
+				const { octokit, owner, repo: name } = await github(repo);
+				const { data } = await octokit.rest.repos.compareCommitsWithBasehead({ owner, repo: name, basehead: `${base}...${head}`, per_page: 100 });
+				const files = (data.files ?? []).filter((f) => !p || f.filename.startsWith(p));
+				const text = [
+					`${base}...${head}: ${data.status}, ${data.ahead_by} commit(s) à frente, ${data.behind_by} atrás`,
+					...data.commits.slice(-MAX_COMMITS).map((c) => `${c.sha.slice(0, 7)} ${c.commit.message.split('\n')[0]}`),
+					'',
+					...files.map((f) => `${f.status} ${f.filename} +${f.additions} -${f.deletions}`),
+					...files.flatMap((f) => (f.patch ? ['', `--- ${f.filename}`, f.patch] : [])),
+				].join('\n');
+				return text.length > MAX_DIFF_BYTES ? text.slice(0, MAX_DIFF_BYTES) + TRUNCATED : text;
 			}),
 		}),
 	};

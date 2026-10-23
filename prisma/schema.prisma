@@ -39,7 +39,10 @@ model Session {
   userId     String
   expiresAt  DateTime
   createdAt  DateTime @default(now())
+  /// Active workspace (switcher). Null or no longer a member = the user's first workspace.
+  workspaceId String?
   user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace  Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
 
   @@index([userId])
 }
@@ -65,6 +68,8 @@ model Workspace {
   mangabaApiKey String?
   createdAt     DateTime       @default(now())
   members       Member[]
+  invites       Invite[]
+  sessions      Session[]
   installations Installation[]
   repositories  Repository[]
   projects      Project[]
@@ -74,12 +79,26 @@ model Workspace {
 model Member {
   workspaceId String
   userId      String
+  /// 'owner' (created the workspace; invites and removes) | 'member' (joined by invite)
   role        String    @default("owner")
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([workspaceId, userId])
   @@index([userId])
+}
+
+/// Pending invite by GitHub login; accepted (and deleted) on that user's next sign-in. Also lets them past ALLOWED_GITHUB_LOGINS.
+model Invite {
+  id          String    @id @default(cuid())
+  workspaceId String
+  /// Lowercase GitHub login.
+  login       String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, login])
+  @@index([login])
 }
 
 // ---------- github ----------
@@ -181,12 +200,32 @@ model ProjectSource {
   projectId    String
   type         SourceType
   repositoryId String?
+  /// doc: { title }. jira: { baseUrl, email, jql, token (AES-GCM sealed, never returned) }.
   config       Json?
+  /// doc/jira: 'syncing' | 'ready' | 'error' (repos track it per branch).
+  status       String?
+  error        String?
+  syncedAt     DateTime?
   createdAt    DateTime    @default(now())
   project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
   repository   Repository? @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  chunks       Chunk[]
 
   @@unique([projectId, repositoryId])
+}
+
+/// Searchable piece of a doc or Jira source: Postgres full-text ('portuguese') over title + content, see knowledge.ts.
+model Chunk {
+  id        String        @id @default(cuid())
+  sourceId  String
+  /// Citation: "doc title § section" or the Jira key.
+  ref       String
+  title     String
+  url       String?
+  content   String
+  source    ProjectSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
 }
 
 // ---------- chat ----------
@@ -199,6 +238,8 @@ model Conversation {
   pinned                   Boolean   @default(false)
   summary                  String?
   summarizedUntilMessageId String?
+  /// Public read-only link (/shared/:token, answers' text only). Null = not shared; revoking clears it.
+  shareToken               String?   @unique
   createdAt                DateTime  @default(now())
   updatedAt                DateTime  @updatedAt
   workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
@@ -221,6 +262,8 @@ model Message {
   cachedTokens   Int?
   /// USD charged by OpenRouter. Null on other providers (they don't report cost).
   cost           Decimal?     @db.Decimal(12, 6)
+  /// 👍 = 1, 👎 = -1 (assistant messages). Base for the eval set.
+  feedback       Int?
   createdAt      DateTime     @default(now())
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 

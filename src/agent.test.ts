@@ -16,10 +16,18 @@ process.env.REPOS_DIR = base;
 afterAll(() => rm(base, { recursive: true, force: true }));
 
 let sha = '';
+let devSha = '';
 const { db } = await import('./db');
 // Prisma's model methods are proxies that ignore spyOn; swap the whole delegate and put it back after.
 const realBranches = db.repoBranch;
-Object.assign(db, { repoBranch: { findFirst: async () => ({ lastSyncedSha: sha }) } });
+Object.assign(db, {
+	repoBranch: {
+		findMany: async () => [
+			{ name: 'main', lastSyncedSha: sha },
+			{ name: 'develop', lastSyncedSha: devSha },
+		],
+	},
+});
 afterAll(() => Object.assign(db, { repoBranch: realBranches }));
 
 const { agentTools, globToRegex, zoektAtom } = await import('./agent');
@@ -40,6 +48,12 @@ async function makeRepo() {
 	await git(path.join(base, 'r1'), ['init', '--bare', '--quiet']);
 	await git(work, ['push', '--quiet', path.join(base, 'r1'), 'HEAD:refs/heads/main']);
 	sha = (await git(work, ['rev-parse', 'HEAD'])).trim();
+	// develop = main + a file that only exists there.
+	await writeFile(path.join(work, 'src', 'next.ts'), 'export const next = 2;\n');
+	await git(work, ['add', '.']);
+	await git(work, [...id, 'commit', '--quiet', '-m', 'next']);
+	await git(work, ['push', '--quiet', path.join(base, 'r1'), 'HEAD:refs/heads/develop']);
+	devSha = (await git(work, ['rev-parse', 'HEAD'])).trim();
 }
 
 test('tools read the bare repo by SHA and never leave its tree', async () => {
@@ -49,12 +63,18 @@ test('tools read the bare repo by SHA and never leave its tree', async () => {
 	const call = (name: 'glob' | 'grep' | 'read_file', input: object) => (tools[name].execute as unknown as (i: object, o: never) => Promise<string>)(input, opts);
 
 	expect(await call('glob', { repo: 'acme/app', pattern: '**/*.ts' })).toBe('src/a.ts');
-	expect(await call('glob', { repo: 'acme/app', pattern: '../**' })).toBe('nenhum arquivo');
+	expect(await call('glob', { repo: 'acme/app', pattern: '**/*.ts', ref: 'develop' })).toBe('src/a.ts\nsrc/next.ts');
+	expect(await call('glob', { repo: 'acme/app', pattern: '../**' })).toStartWith('nenhum arquivo em main');
 
 	expect(await call('grep', { repo: 'acme/app', regex: 'const \\w+ = 1' })).toBe('src/a.ts:1:export const a = 1;');
-	expect(await call('grep', { repo: 'acme/app', regex: 'app', glob: '*.ts' })).toBe('nenhum resultado');
+	expect(await call('grep', { repo: 'acme/app', regex: 'app', glob: '*.ts' })).toStartWith('nenhum resultado em main');
 
-	expect(await call('read_file', { repo: 'acme/app', path: './src/a.ts', start: 2 })).toBe(`acme/app/./src/a.ts@${sha.slice(0, 7)}\n2\texport const b = "x y";\n3\t`);
+	expect(await call('read_file', { repo: 'acme/app', path: './src/a.ts', start: 2 })).toBe(`acme/app/./src/a.ts@${sha.slice(0, 7)} · branch main\n2\texport const b = "x y";\n3\t`);
+	// Cascade: not in main → hint with the next branches; there with ref, or by sha.
+	expect(await call('read_file', { repo: 'acme/app', path: 'src/next.ts' })).toContain('outras branches, em ordem: develop (use ref)');
+	expect(await call('read_file', { repo: 'acme/app', path: 'src/next.ts', ref: 'develop' })).toContain('export const next = 2;');
+	expect(await call('read_file', { repo: 'acme/app', path: 'src/next.ts', ref: devSha.slice(0, 7) })).toContain('export const next = 2;');
+	expect(await call('read_file', { repo: 'acme/app', path: 'README.md', ref: 'nope' })).toContain('ref desconhecida: nope. Branches sincronizadas, em ordem de prioridade: main, develop');
 	expect(await call('read_file', { repo: 'acme/app', path: 'src' })).toContain('é um diretório');
 	expect(await call('read_file', { repo: 'acme/app', path: '../secret' })).toContain('não encontrado');
 	expect(await call('read_file', { repo: 'acme/app', path: path.join(base, 'secret') })).toContain('não encontrado');
