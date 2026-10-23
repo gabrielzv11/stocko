@@ -47,3 +47,35 @@ test('chat: 400 on an oversized question, 429 over the 24h spend cap and the per
 		await db.user.delete({ where: { id: user.id } });
 	}
 });
+
+test('feedback: only on assistant messages of the own workspace; comes back as metadata', async () => {
+	const user = await db.user.create({
+		data: { name: 'test', memberships: { create: { workspace: { create: { name: 'test' } } } } },
+		include: { memberships: true },
+	});
+	const workspaceId = user.memberships[0]!.workspaceId;
+	const other = await db.workspace.create({ data: { name: 'other' } });
+	const token = crypto.randomUUID();
+	await db.session.create({ data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
+	const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+	const rate = (id: string, value: 1 | -1 | null) => chat.request(`/messages/${id}/feedback`, { method: 'PUT', headers, body: JSON.stringify({ value }) }).then((r) => r.status);
+
+	try {
+		const conversation = await db.conversation.create({ data: { workspaceId } });
+		const question = await db.message.create({ data: { conversationId: conversation.id, role: 'user', parts: [] } });
+		const answer = await db.message.create({ data: { conversationId: conversation.id, role: 'assistant', parts: [] } });
+		const foreign = await db.conversation.create({ data: { workspaceId: other.id, messages: { create: { role: 'assistant', parts: [] } } }, include: { messages: true } });
+
+		expect(await rate(answer.id, 1)).toBe(204);
+		expect(await rate(question.id, 1)).toBe(404);
+		expect(await rate(foreign.messages[0]!.id, -1)).toBe(404);
+		expect((await db.message.findUniqueOrThrow({ where: { id: foreign.messages[0]!.id } })).feedback).toBeNull();
+
+		const res = await chat.request(`/conversations/${conversation.id}`, { headers });
+		const { messages } = (await res.json()) as { messages: { id: string; metadata: { feedback: number | null } }[] };
+		expect(messages.find((m) => m.id === answer.id)?.metadata.feedback).toBe(1);
+	} finally {
+		await db.workspace.deleteMany({ where: { id: { in: [workspaceId, other.id] } } });
+		await db.user.delete({ where: { id: user.id } });
+	}
+});

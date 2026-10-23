@@ -99,10 +99,24 @@ chat.get('/conversations/:id', requireAuth, async (c) => {
 			id: true,
 			title: true,
 			projects: linkedProjects,
-			messages: { orderBy: { createdAt: 'asc' }, select: { id: true, role: true, parts: true } },
+			messages: { orderBy: { createdAt: 'asc' }, select: { id: true, role: true, parts: true, feedback: true } },
 		},
 	});
-	return conversation ? c.json(conversation) : c.json({ error: 'not_found' }, 404);
+	if (!conversation) return c.json({ error: 'not_found' }, 404);
+	// UIMessage.metadata: the front's useChat keeps it per message.
+	const messages = conversation.messages.map(({ feedback, ...m }) => ({ ...m, metadata: { feedback } }));
+	return c.json({ ...conversation, messages });
+});
+
+// 👍/👎 on an answer; null clears it.
+chat.put('/messages/:id/feedback', requireAuth, async (c) => {
+	const body = z.object({ value: z.union([z.literal(1), z.literal(-1), z.null()]) }).safeParse(await c.req.json().catch(() => null));
+	if (!body.success) return c.json({ error: 'invalid_body' }, 400);
+	const { count } = await db.message.updateMany({
+		where: { id: c.req.param('id'), role: 'assistant', conversation: { workspaceId: c.var.workspaceId } },
+		data: { feedback: body.data.value },
+	});
+	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
 });
 
 // :id vem do useChat; a conversa nasce na primeira mensagem, sem projeto (o agente vincula depois).
@@ -213,15 +227,23 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 
 	// Roda até o fim (e salva) mesmo se o cliente desconectar no meio.
 	void result.consumeStream();
+	// Same id in the stream and in the DB: feedback on a just-streamed answer finds its row.
+	const assistantId = crypto.randomUUID();
 	return result.toUIMessageStreamResponse({
 		originalMessages: history,
+		generateMessageId: () => assistantId,
 		onEnd: async ({ responseMessage }) => {
 			if (!responseMessage.parts.length) return;
 			await db.conversation.update({
 				where: { id },
 				data: {
 					messages: {
-						create: { role: 'assistant', parts: responseMessage.parts as Prisma.InputJsonValue, ...(await turnUsage(llm, result)) },
+						create: {
+							id: assistantId,
+							role: 'assistant',
+							parts: responseMessage.parts as Prisma.InputJsonValue,
+							...(await turnUsage(llm, result)),
+						},
 					},
 				},
 			});
