@@ -135,7 +135,7 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 	const projects = await db.project.findMany({
 		where: { workspaceId, ...(projectIds.length && { id: { in: projectIds } }) },
 		include: {
-			sources: { include: { repository: true } },
+			sources: { include: { repository: { include: { branches: { orderBy: { priority: 'asc' } } } } } },
 			apis: { select: { id: true, title: true, description: true, usage: true, baseUrl: true } },
 		},
 	});
@@ -146,7 +146,10 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 	await refreshStale(repos.map((r) => r.id));
 
 	const context = projects
-		.map((p) => `- ${p.name} (id: ${p.id}): ${p.sources.flatMap((s) => s.repository?.fullName ?? []).join(', ') || 'sem repositórios'}`)
+		.map((p) => {
+			const repos = p.sources.flatMap((s) => (s.repository ? [`${s.repository.fullName} [${s.repository.branches.map((b) => b.name).join(' → ')}]`] : []));
+			return `- ${p.name} (id: ${p.id}): ${repos.join(', ') || 'sem repositórios'}`;
+		})
 		.join('\n');
 	// Tags: descrição/uso multilinha não se mistura com a próxima API nem com as regras.
 	const apiContext = apis
@@ -164,6 +167,7 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 			'Você é o Stocko, assistente que responde perguntas sobre os produtos de software do usuário lendo o código dos repositórios e consultando as APIs cadastradas nos projetos. Responda em português do Brasil.',
 			'Use as tools para encontrar a resposta antes de responder: list_repos, glob, grep e read_file no código; list_commits e diff_refs no histórico ("o que mudou", "quem mexeu", "quando quebrou"); search_api, describe_api_operation e call_api nas APIs, quando houver. Não invente arquivos, trechos, endpoints, métricas ou comportamentos; se não encontrar, diga.',
 			'Cite as fontes no formato `owner/repo/caminho#Lx-Ly@sha` (sha curto vindo do read_file).',
+			'Branches: cada repositório lista as branches observadas entre colchetes, em ordem de prioridade. A primeira é o que está no ar e é a que as tools leem por padrão; as demais são o que está vindo, leia-as com ref. Se algo não existe na primeira, procure nas próximas, em ordem, e diga de qual branch veio ("não está em main, existe em develop"). Ao citar algo fora da primeira, diga a branch.',
 			'Quando uma imagem explicar melhor que texto (arquitetura, comunicação entre serviços, sequência de chamadas, dependências entre módulos, modelo de dados), inclua um diagrama em bloco ```mermaid (flowchart, sequenceDiagram, classDiagram ou erDiagram) montado a partir do código lido. Agrupe com subgraph, use rótulos curtos e ponha entre aspas os que tiverem caracteres especiais.',
 			'Vínculo da conversa: assim que tiver certeza de que a pergunta é sobre um ou mais projetos da lista, chame link_projects uma vez com os ids de todos os envolvidos. Em dúvida, ou se a pergunta não for sobre um projeto listado, não chame. Não repita projetos já vinculados.',
 			context ? `Projetos:\n${context}` : 'Nenhum projeto cadastrado: peça ao usuário para criar um projeto com repositórios.',
