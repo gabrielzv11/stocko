@@ -11,7 +11,7 @@ import { Icon } from '@/components/ui/icons';
 import { api } from '@/lib/api';
 import { clearToken, githubInstallUrl } from '@/lib/auth';
 import { cn } from '@/lib/cn';
-import { switchWorkspace, useMe } from '@/lib/me';
+import { createWorkspace, switchWorkspace, useMe } from '@/lib/me';
 import { useNavigate } from 'react-router-dom';
 
 async function logout() {
@@ -63,7 +63,7 @@ function Profile({ collapsed }: Props) {
 				</DropdownMenuTrigger>
 
 				<DropdownMenuContent className='w-max' side='top'>
-					{me && me.workspaces.length > 1 && (
+					{me && (me.workspaces.length > 1 || me.canCreateWorkspace) && (
 						<>
 							<DropdownMenuLabel className='text-muted-foreground text-xs'>Workspace</DropdownMenuLabel>
 							<DropdownMenuGroup>
@@ -73,6 +73,12 @@ function Profile({ collapsed }: Props) {
 										{w.name}
 									</DropdownMenuItem>
 								))}
+								{me.canCreateWorkspace && (
+									<DropdownMenuItem onSelect={createWorkspace}>
+										<Icon icon='plus' size='sm' />
+										Novo workspace
+									</DropdownMenuItem>
+								)}
 							</DropdownMenuGroup>
 							<DropdownMenuSeparator />
 						</>
@@ -80,9 +86,11 @@ function Profile({ collapsed }: Props) {
 					<DropdownMenuGroup>
 						<DropdownMenuItem onSelect={() => navigate('/settings')}>Configurações</DropdownMenuItem>
 						<DropdownMenuItem onSelect={() => navigate('/usage')}>Uso</DropdownMenuItem>
-						<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl)}>
-							{me?.hasInstallation ? 'Gerenciar acesso ao GitHub' : 'Conectar ao GitHub'}
-						</DropdownMenuItem>
+						{me?.role === 'owner' && (
+							<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl(me.workspaceId))}>
+								{me.hasInstallation ? 'Gerenciar acesso ao GitHub' : 'Conectar ao GitHub'}
+							</DropdownMenuItem>
+						)}
 						<DropdownMenuItem onSelect={logout}>Sair</DropdownMenuItem>
 					</DropdownMenuGroup>
 				</DropdownMenuContent>

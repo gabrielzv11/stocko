@@ -16,7 +16,7 @@ const schema = z.object({
 		.transform((s) => s.replace(/\\n/g, '\n'))
 		// Fingerprint (SHA256:...) in place of the .pem only fails on the first GitHub call; fail at boot instead.
 		.refine((s) => s.includes('PRIVATE KEY-----'), 'expected .pem content, not the key fingerprint'),
-	// GitHub App → Webhook secret. Unset = /webhooks/github off (repos re-sync by age on each chat).
+	// GitHub App → Webhook secret. Unset = /webhooks/github off (repos only update on manual sync).
 	GITHUB_WEBHOOK_SECRET: z.string().min(1).optional(),
 	// OpenRouter (openrouter.ai/keys). Model is any OpenRouter slug; avoid `:free` with client code.
 	OPENROUTER_API_KEY: z.string().min(1),
@@ -40,8 +40,11 @@ const schema = z.object({
 		.string()
 		.refine((s) => Buffer.from(s, 'base64').length === 32, 'expected 32 bytes in base64')
 		.optional(),
-	// Comma-separated GitHub logins allowed to sign in.
-	ALLOWED_GITHUB_LOGINS: z.string().transform((s) =>
+	// Comma-separated GitHub logins that may sign in and create workspaces. Invited logins get in without being listed.
+	ALLOWED_GITHUB_LOGINS: z
+		.string()
+		.default('')
+		.transform((s) =>
 		s
 			.split(',')
 			.map((l) => l.trim().toLowerCase())

@@ -3,6 +3,7 @@ import { CheckboxComposeItem } from '@/components/ui/checkboxCompose';
 import Dialog from '@/components/ui/dialog';
 import { TextField } from '@/components/ui/textField';
 import { githubInstallUrl } from '@/lib/auth';
+import { useMe } from '@/lib/me';
 import { useState } from 'react';
 import { useRepos, type Project } from '../api';
 
@@ -29,6 +30,7 @@ interface Props {
 function ProjectDialog({ open, onClose, title, submitLabel, project, onSubmit, pending, error }: Props) {
 	const [repoSearch, setRepoSearch] = useState('');
 	const { data: repos = [], isPending: reposPending } = useRepos();
+	const { data: me } = useMe();
 	const repoTerm = repoSearch.trim().toLowerCase();
 	const selected = new Set(project?.repos.map((r) => r.id));
 
@@ -82,9 +84,11 @@ function ProjectDialog({ open, onClose, title, submitLabel, project, onSubmit, p
 								</div>
 							))}
 						</div>
-						<a href={githubInstallUrl} className='text-muted-foreground text-xs underline'>
-							Liberar outros repositórios no GitHub
-						</a>
+						{me?.role === 'owner' && (
+							<a href={githubInstallUrl(me.workspaceId)} className='text-muted-foreground text-xs underline'>
+								Liberar outros repositórios no GitHub
+							</a>
+						)}
 
 						{error && <p className='text-sm text-red-500'>{error}</p>}
 					</div>

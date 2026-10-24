@@ -90,9 +90,9 @@ Contexto:
 
 - Login "Entrar com GitHub" (OAuth do GitHub App), `state` no banco.
 - Token opaco (32 bytes) entregue em `app/login#token=` (fragment), armazenado no localStorage do front, enviado como `Authorization: Bearer`. Banco guarda só `sha256`. TTL 7 dias deslizante.
-- Allowlist `ALLOWED_GITHUB_LOGINS`.
+- Allowlist `ALLOWED_GITHUB_LOGINS` = quem entra sem convite e cria workspaces (User N─N Workspace). Convidados entram sem estar nela.
 - `requireAuth` único; futuro: ramo para JWT do host (Module Federation).
-- Instalação do App: cada login vincula ao workspace as instalações de `GET /user/installations` (token do usuário); `installation_id` da URL é ignorado.
+- Instalação do App: `GET /github/install?workspace=` (dono) vincula a esse workspace as instalações de `GET /user/installations` (token do usuário) e abre a página de instalação; a Setup URL volta com o workspace num cookie. Signup vincula ao workspace recém-criado. `installation_id` da URL é ignorado. Mesma instalação pode servir N workspaces.
 - Toda query filtrada por `workspaceId` (anti-IDOR).
 - Webhook com HMAC (`X-Hub-Signature-256`) sobre o raw body.
 - Front: markdown do agente renderizado **sem HTML bruto** (prompt injection via código → XSS → roubo de token).

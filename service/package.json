@@ -1,6 +1,7 @@
 {
   "name": "stocko-service",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/index.ts",
@@ -9,7 +10,8 @@
     "db:migrate": "bunx --bun prisma migrate dev",
     "db:deploy": "bunx --bun prisma migrate deploy",
     "db:generate": "bunx --bun prisma generate",
-    "typecheck": "tsc"
+    "typecheck": "tsc",
+    "setup:github": "bun scripts/setup-github.ts"
   },
   "dependencies": {
     "@ai-sdk/openai-compatible": "3.0.74",

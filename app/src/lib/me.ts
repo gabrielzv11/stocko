@@ -13,6 +13,8 @@ export type Me = {
 	role: Role;
 	workspaces: { id: string; name: string; role: Role }[];
 	hasInstallation: boolean;
+	/** Login em ALLOWED_GITHUB_LOGINS: pode criar workspaces. */
+	canCreateWorkspace: boolean;
 };
 
 export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api.get<Me>('/me').then((r) => r.data) });
@@ -21,4 +23,10 @@ export const useMe = () => useQuery({ queryKey: ['me'], queryFn: () => api.get<M
 export async function switchWorkspace(id: string) {
 	await api.post(`/workspaces/${id}/switch`);
 	window.location.assign('/');
+}
+
+/** Cria um workspace (já vira o ativo) e abre as configurações para renomear e conectar o GitHub. */
+export async function createWorkspace() {
+	await api.post('/workspaces', { name: 'Novo workspace' });
+	window.location.assign('/settings');
 }

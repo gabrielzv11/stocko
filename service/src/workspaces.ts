@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
-import { requireAuth, type AuthVars } from './auth';
+import { canCreateWorkspace, requireAuth, type AuthVars } from './auth';
 import { db } from './db';
 
 export const workspaces = new Hono<{ Variables: AuthVars }>();
@@ -9,6 +9,26 @@ export const workspaces = new Hono<{ Variables: AuthVars }>();
 const requireOwner = createMiddleware<{ Variables: AuthVars }>(async (c, next) => {
 	if (c.var.role !== 'owner') return c.json({ error: 'forbidden', message: 'Só o dono do workspace pode fazer isso.' }, 403);
 	await next();
+});
+
+const workspaceName = z.object({ name: z.string().trim().min(1).max(60) });
+
+/** New workspace owned by the user (ALLOWED_GITHUB_LOGINS only); becomes the session's active one. */
+workspaces.post('/workspaces', requireAuth, async (c) => {
+	const identity = await db.identity.findFirst({ where: { userId: c.var.userId, provider: 'github' } });
+	if (!canCreateWorkspace(identity?.login)) return c.json({ error: 'forbidden', message: 'Seu login não pode criar workspaces.' }, 403);
+	const body = workspaceName.safeParse(await c.req.json().catch(() => null));
+	if (!body.success) return c.json({ error: 'invalid_body', message: 'Nome inválido.' }, 400);
+	const workspace = await db.workspace.create({ data: { name: body.data.name, members: { create: { userId: c.var.userId } } } });
+	await db.session.update({ where: { tokenHash: c.var.tokenHash }, data: { workspaceId: workspace.id } });
+	return c.json({ id: workspace.id }, 201);
+});
+
+workspaces.patch('/workspace', requireAuth, requireOwner, async (c) => {
+	const body = workspaceName.safeParse(await c.req.json().catch(() => null));
+	if (!body.success) return c.json({ error: 'invalid_body', message: 'Nome inválido.' }, 400);
+	await db.workspace.update({ where: { id: c.var.workspaceId }, data: { name: body.data.name } });
+	return c.body(null, 204);
 });
 
 /** Active workspace of this session (the switcher); only one the user is a member of. */

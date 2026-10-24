@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { TextField } from '@/components/ui/textField';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
+import { useMe } from '@/lib/me';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { useState } from 'react';
@@ -113,6 +114,39 @@ function SettingsForm({ settings }: { settings: Settings }) {
 	);
 }
 
+/** Nome do workspace ativo; só o dono renomeia. */
+function WorkspaceName() {
+	const { data: me } = useMe();
+	const queryClient = useQueryClient();
+	const rename = useMutation({
+		mutationFn: (name: string) => api.patch('/workspace', { name }),
+		onSuccess: () => {
+			toast.success('Workspace renomeado.');
+			queryClient.invalidateQueries({ queryKey: ['me'] });
+		},
+	});
+	const current = me?.workspaces.find((w) => w.id === me.workspaceId);
+	if (!me || !current || me.role !== 'owner') return null;
+
+	function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
+		e.preventDefault();
+		const name = String(new FormData(e.currentTarget).get('name')).trim();
+		if (name) rename.mutate(name);
+	}
+
+	return (
+		<form key={current.id} onSubmit={handleSubmit} className='flex flex-col gap-2'>
+			<h2 className='text-base font-semibold'>Workspace</h2>
+			<div className='flex gap-2'>
+				<TextField name='name' size='sm' defaultValue={current.name} maxLength={60} required />
+				<Button type='submit' size='sm' loading={rename.isPending} className='w-auto px-6'>
+					Renomear
+				</Button>
+			</div>
+		</form>
+	);
+}
+
 export default function SettingsPage() {
 	const { data, isPending, isError } = useQuery({
 		queryKey: ['settings'],
@@ -122,6 +156,7 @@ export default function SettingsPage() {
 	return (
 		<div className='mx-auto flex w-full max-w-2xl flex-col gap-4 p-4 md:p-6'>
 			<h1 className='text-2xl font-semibold'>Configurações</h1>
+			<WorkspaceName />
 			{isPending && <p className='text-muted-foreground text-sm'>Carregando...</p>}
 			{isError && <p className='text-sm text-red-500'>Não foi possível carregar as configurações.</p>}
 			{data && <SettingsForm settings={data} />}

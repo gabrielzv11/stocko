@@ -11,23 +11,25 @@ process.env.OPENROUTER_API_KEY ||= 'test';
 const { auth, sha256 } = await import('./auth');
 const { db } = await import('./db');
 const { workspaces } = await import('./workspaces');
+const { env } = await import('./env');
 
 const suffix = Date.now().toString(36);
 
 /** Runs the OAuth callback with GitHub mocked as `login`; returns the session token, or the error in the redirect. */
-async function signIn(login: string, githubId: number) {
+async function signIn(login: string, githubId: number, opts: { kind?: string; workspaceId?: string; installations?: number[] } = {}) {
 	const state = crypto.randomUUID();
-	await db.oAuthState.create({ data: { state, kind: 'login', expiresAt: new Date(Date.now() + 60_000) } });
+	await db.oAuthState.create({ data: { state, kind: opts.kind ?? 'login', workspaceId: opts.workspaceId, expiresAt: new Date(Date.now() + 60_000) } });
 	const realFetch = globalThis.fetch;
 	globalThis.fetch = (async (url: string) => {
 		if (url.includes('/login/oauth/access_token')) return Response.json({ access_token: 'gho_test' });
 		if (url.endsWith('/user')) return Response.json({ id: githubId, login, name: null, avatar_url: '' });
-		return Response.json({ installations: [] });
+		return Response.json({ installations: (opts.installations ?? []).map((id) => ({ id, account: { login: 'acme' } })) });
 	}) as typeof fetch;
 	try {
 		const res = await auth.request(`/auth/github/callback?code=c&state=${state}`);
-		const hash = new URL(res.headers.get('Location')!).hash;
-		return { token: hash.match(/token=(.+)/)?.[1], error: hash.match(/error=(.+)/)?.[1] };
+		const location = new URL(res.headers.get('Location')!);
+		const hash = location.hash;
+		return { token: hash.match(/token=(.+)/)?.[1], error: hash.match(/error=(.+)/)?.[1], location };
 	} finally {
 		globalThis.fetch = realFetch;
 	}
@@ -81,5 +83,51 @@ test('workspaces: invite lets a login in and joins it; owner-only management; sw
 	} finally {
 		await db.workspace.delete({ where: { id: team } });
 		await db.user.deleteMany({ where: { id: { in: [owner.id, inviteeUserId].filter(Boolean) } } });
+	}
+});
+
+test('workspaces: allowlisted user creates and renames workspaces; one installation links to N of them, owner only', async () => {
+	const login = `founder-${suffix}`;
+	const githubId = Number(Date.now() % 1e9) + 7;
+	const installationId = Date.now();
+	env.ALLOWED_GITHUB_LOGINS.push(login);
+	let userId = '';
+
+	try {
+		// Signup: own workspace, gets the installations the user can see.
+		const { token } = await signIn(login, githubId, { installations: [installationId] });
+		userId = (await db.identity.findFirstOrThrow({ where: { login } })).userId;
+		const first = (await (await auth.request('/me', { headers: { Authorization: `Bearer ${token}` } })).json()) as { workspaceId: string; canCreateWorkspace: boolean };
+		expect(first.canCreateWorkspace).toBe(true);
+		expect(await db.installation.count({ where: { workspaceId: first.workspaceId, githubInstallationId: BigInt(installationId) } })).toBe(1);
+
+		const call = (path: string, init: RequestInit = {}) =>
+			workspaces.request(path, { ...init, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' } });
+		expect((await call('/workspaces', { method: 'POST', body: JSON.stringify({ name: ' ' }) })).status).toBe(400);
+		const res = await call('/workspaces', { method: 'POST', body: JSON.stringify({ name: 'Time B' }) });
+		expect(res.status).toBe(201);
+		const { id: second } = (await res.json()) as { id: string };
+		expect((await call('/workspace', { method: 'PATCH', body: JSON.stringify({ name: 'Time B2' }) })).status).toBe(204);
+		expect((await db.workspace.findUniqueOrThrow({ where: { id: second } })).name).toBe('Time B2');
+
+		// Plain login links nothing; connect for the second workspace links the same installation there and goes to GitHub's install page.
+		await signIn(login, githubId, { installations: [installationId] });
+		expect(await db.installation.count({ where: { workspaceId: second } })).toBe(0);
+		const connect = await signIn(login, githubId, { kind: 'connect', workspaceId: second, installations: [installationId] });
+		expect(connect.location.hostname).toBe('github.com');
+		expect(await db.installation.count({ where: { githubInstallationId: BigInt(installationId) } })).toBe(2);
+
+		// A workspace they don't own gets nothing.
+		const foreign = await db.workspace.create({ data: { name: 'foreign' } });
+		await signIn(login, githubId, { kind: 'connect', workspaceId: foreign.id, installations: [installationId] });
+		expect(await db.installation.count({ where: { workspaceId: foreign.id } })).toBe(0);
+		await db.workspace.delete({ where: { id: foreign.id } });
+
+		// Not allowlisted anymore: can't create.
+		env.ALLOWED_GITHUB_LOGINS.pop();
+		expect((await call('/workspaces', { method: 'POST', body: JSON.stringify({ name: 'C' }) })).status).toBe(403);
+	} finally {
+		await db.workspace.deleteMany({ where: { members: { some: { userId } } } });
+		if (userId) await db.user.delete({ where: { id: userId } });
 	}
 });

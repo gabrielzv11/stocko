@@ -49,10 +49,12 @@ model Session {
 
 /// CSRF state for OAuth login and GitHub App install flows.
 model OAuthState {
-  state     String   @id
-  kind      String // 'login' | 'install'
-  userId    String?
-  expiresAt DateTime
+  state       String   @id
+  kind        String // 'login' | 'connect' (links installations to workspaceId, then goes to the App's install page)
+  userId      String?
+  /// Workspace that gets the user's App installations (owner only, checked in the callback).
+  workspaceId String?
+  expiresAt   DateTime
 }
 
 // ---------- tenancy ----------
@@ -106,11 +108,15 @@ model Invite {
 model Installation {
   id                   String       @id @default(cuid())
   workspaceId          String
-  githubInstallationId BigInt       @unique
+  githubInstallationId BigInt
   accountLogin         String
   createdAt            DateTime     @default(now())
   workspace            Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   repositories         Repository[]
+
+  /// Same GitHub installation can serve N workspaces.
+  @@unique([workspaceId, githubInstallationId])
+  @@index([githubInstallationId])
 }
 
 /// One clone per repository per workspace, shared by N projects.

@@ -1,4 +1,5 @@
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { createMiddleware } from 'hono/factory';
 import { db } from './db';
 import { env } from './env';
@@ -8,6 +9,14 @@ const SESSION_TTL_MS = 7 * DAY_MS;
 const STATE_TTL_MS = 10 * 60 * 1000;
 
 export type AuthVars = { userId: string; workspaceId: string; role: string; tokenHash: string };
+
+// Workspace that asked to connect the App; survives the trip through GitHub's install page back to the Setup URL.
+const INSTALL_COOKIE = 'stocko_install_ws';
+// GitHub's page to install the App on an account and pick repos.
+const installPage = `https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`;
+
+/** Who may create workspaces. Invited users get in without being listed. */
+export const canCreateWorkspace = (login: string | null | undefined) => !!login && env.ALLOWED_GITHUB_LOGINS.includes(login.toLowerCase());
 
 export const randomToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 export const sha256 = (s: string) => new Bun.CryptoHasher('sha256').update(s).digest('hex');
@@ -41,22 +50,28 @@ export const requireAuth = createMiddleware<{ Variables: AuthVars }>(async (c, n
 
 export const auth = new Hono<{ Variables: AuthVars }>();
 
-auth.get('/auth/github/login', async (c) => {
-	const state = randomToken();
-	await db.oAuthState.deleteMany({ where: { expiresAt: { lt: new Date() } } });
-	await db.oAuthState.create({ data: { state, kind: 'login', expiresAt: new Date(Date.now() + STATE_TTL_MS) } });
-
-	// Explicit callback on this host, else GitHub uses the App's first Callback URL (localhost in prod).
-	// Behind a proxy (Railway) the request arrives as http; X-Forwarded-Proto has the real scheme.
+// Explicit callback on this host, else GitHub uses the App's first Callback URL (localhost in prod).
+// Behind a proxy (Railway) the request arrives as http; X-Forwarded-Proto has the real scheme.
+function callbackUrl(c: Context) {
 	const callback = new URL('/auth/github/callback', c.req.url);
 	callback.protocol = c.req.header('X-Forwarded-Proto') ?? callback.protocol;
+	return callback;
+}
+
+async function authorize(c: Context, kind: 'login' | 'connect', workspaceId: string | undefined) {
+	const state = randomToken();
+	await db.oAuthState.deleteMany({ where: { expiresAt: { lt: new Date() } } });
+	await db.oAuthState.create({ data: { state, kind, workspaceId, expiresAt: new Date(Date.now() + STATE_TTL_MS) } });
 
 	const url = new URL('https://github.com/login/oauth/authorize');
 	url.searchParams.set('client_id', env.GITHUB_CLIENT_ID);
-	url.searchParams.set('redirect_uri', callback.toString());
+	url.searchParams.set('redirect_uri', callbackUrl(c).toString());
 	url.searchParams.set('state', state);
 	return c.redirect(url.toString());
-});
+}
+
+// Also the App's Setup URL: after an install started by /github/install, the cookie says which workspace gets it.
+auth.get('/auth/github/login', (c) => authorize(c, 'login', getCookie(c, INSTALL_COOKIE)));
 
 auth.get('/auth/github/callback', async (c) => {
 	const fail = (error: string) => c.redirect(`${env.FRONTEND_URL}/login#error=${error}`);
@@ -64,8 +79,8 @@ auth.get('/auth/github/callback', async (c) => {
 	if (!code || !state) return fail('invalid_request');
 
 	// Deleting consumes the state: single use.
-	const { count } = await db.oAuthState.deleteMany({ where: { state, kind: 'login', expiresAt: { gt: new Date() } } });
-	if (!count) return fail('invalid_state');
+	const saved = await db.oAuthState.delete({ where: { state } }).catch(() => null);
+	if (!saved || saved.expiresAt < new Date() || !['login', 'connect'].includes(saved.kind)) return fail('invalid_state');
 
 	const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
 		method: 'POST',
@@ -87,54 +102,71 @@ auth.get('/auth/github/callback', async (c) => {
 	const invites = await db.invite.findMany({ where: { login }, orderBy: { createdAt: 'asc' } });
 	// Allowlist, or vouched for by a workspace: pending invite or still a member of one they were invited to.
 	const invitedMember = identity ? await db.member.count({ where: { userId: identity.userId, role: 'member' } }) : 0;
-	if (!env.ALLOWED_GITHUB_LOGINS.includes(login) && !invites.length && !invitedMember) return fail('forbidden');
+	if (!canCreateWorkspace(login) && !invites.length && !invitedMember) return fail('forbidden');
 
 	const joined = invites.map((i) => ({ workspaceId: i.workspaceId, role: 'member' }));
 	const userId = identity
 		? (await db.identity.update({ where: { id: identity.id }, data: { login: gh.login, user: { update: profile } } }))
 				.userId
-		: (
-				await db.user.create({
-					data: {
-						...profile,
-						identities: { create: { provider: 'github', subject, login: gh.login } },
-						// Invited: joins those workspaces. Otherwise gets their own.
-						memberships: joined.length ? { create: joined } : { create: { workspace: { create: { name: gh.login } } } },
-					},
-				})
-			).id;
-	if (identity && joined.length) await db.member.createMany({ data: joined.map((j) => ({ ...j, userId })), skipDuplicates: true });
+		: (await db.user.create({ data: { ...profile, identities: { create: { provider: 'github', subject, login: gh.login } } } })).id;
+	if (joined.length) await db.member.createMany({ data: joined.map((j) => ({ ...j, userId })), skipDuplicates: true });
 	if (invites.length) await db.invite.deleteMany({ where: { id: { in: invites.map((i) => i.id) } } });
-	// Removed from every workspace they joined, now allowlisted: gets their own instead of a dead session.
-	if (!(await db.member.count({ where: { userId } })))
-		await db.member.create({ data: { user: { connect: { id: userId } }, workspace: { create: { name: gh.login } } } });
+	// New and not invited, or removed from every workspace they joined (now allowlisted): gets their own instead of a dead session.
+	const created = (await db.member.count({ where: { userId } }))
+		? null
+		: await db.member.create({ data: { user: { connect: { id: userId } }, workspace: { create: { name: gh.login } } } });
 
-	// Links every App installation this GitHub user can access to the workspace they own (none when they only joined by invite).
+	// Links every App installation this GitHub user can access to one workspace they own: the one that asked
+	// (/github/install), else the one just created. A plain login of an existing user links nothing.
 	// The installation_id GitHub appends to the setup URL is spoofable, so the user's own token is the source of truth.
-	// Ones owned by another workspace are skipped.
+	// The same installation can serve N workspaces.
 	// ponytail: first 100 installations only; paginate if a user ever has more.
-	const owned = await db.member.findFirst({ where: { userId, role: 'owner' } });
-	const instRes = owned && (await fetch('https://api.github.com/user/installations?per_page=100', { headers }));
-	if (owned && instRes?.ok) {
+	const target = saved.workspaceId
+		? await db.member.findFirst({ where: { userId, role: 'owner', workspaceId: saved.workspaceId } })
+		: created;
+	const instRes = target && (await fetch('https://api.github.com/user/installations?per_page=100', { headers }));
+	if (target && instRes?.ok) {
 		const { installations } = (await instRes.json()) as { installations: { id: number; account: { login: string } }[] };
 		await db.installation.createMany({
-			data: installations.map((i) => ({ workspaceId: owned.workspaceId, githubInstallationId: BigInt(i.id), accountLogin: i.account.login })),
+			data: installations.map((i) => ({ workspaceId: target.workspaceId, githubInstallationId: BigInt(i.id), accountLogin: i.account.login })),
 			skipDuplicates: true,
 		});
 	}
 
+	// Connect: installations the user already had are linked; now GitHub's page to install on another account or pick repos.
+	// The front already has a session, so no new one.
+	if (saved.kind === 'connect') return c.redirect(installPage);
+
+	deleteCookie(c, INSTALL_COOKIE, { path: '/' });
 	const token = randomToken();
 	await db.session.create({
-		// Just accepted an invite → lands in that workspace.
-		data: { tokenHash: sha256(token), userId, workspaceId: invites[0]?.workspaceId, expiresAt: new Date(Date.now() + SESSION_TTL_MS) },
+		// Just accepted an invite → lands in that workspace; just linked an installation → in the one that got it.
+		data: {
+			tokenHash: sha256(token),
+			userId,
+			workspaceId: invites[0]?.workspaceId ?? target?.workspaceId,
+			expiresAt: new Date(Date.now() + SESSION_TTL_MS),
+		},
 	});
 	// Fragment never reaches servers or logs.
 	return c.redirect(`${env.FRONTEND_URL}/login#token=${token}`);
 });
 
-// GitHub install page (pick account + repos). The App's Setup URL points back to /auth/github/login,
-// which re-runs OAuth and links the installation above.
-auth.get('/github/install', (c) => c.redirect(`https://github.com/apps/${env.GITHUB_APP_SLUG}/installations/new`));
+// "Connect GitHub" for ?workspace=: OAuth links the installations the user already has, then GitHub's install page
+// (pick account + repos), whose Setup URL comes back to /auth/github/login carrying the workspace in the cookie.
+// The id isn't trusted: the callback only links to a workspace this GitHub user owns.
+auth.get('/github/install', (c) => {
+	const workspaceId = c.req.query('workspace');
+	if (!workspaceId) return c.redirect(installPage);
+	setCookie(c, INSTALL_COOKIE, workspaceId, {
+		httpOnly: true,
+		sameSite: 'Lax',
+		secure: callbackUrl(c).protocol === 'https:',
+		maxAge: STATE_TTL_MS / 1000,
+		path: '/',
+	});
+	return authorize(c, 'connect', workspaceId);
+});
 
 auth.post('/auth/logout', requireAuth, async (c) => {
 	await db.session.delete({ where: { tokenHash: c.var.tokenHash } });
@@ -161,5 +193,6 @@ auth.get('/me', requireAuth, async (c) => {
 		role: c.var.role,
 		workspaces: user.memberships.map((m) => ({ id: m.workspaceId, name: m.workspace.name, role: m.role })),
 		hasInstallation: installations > 0,
+		canCreateWorkspace: canCreateWorkspace(user.identities[0]?.login),
 	});
 });
