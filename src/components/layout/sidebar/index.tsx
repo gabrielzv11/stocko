@@ -1,7 +1,7 @@
 import { IconButton } from '@/components/ui/iconButton';
 import { Icon } from '@/components/ui/icons';
 import { Text } from '@/components/ui/text';
-import { useConversations } from '@/features/home/api';
+import { type ConversationSummary, useConversations } from '@/features/home/api';
 import { ConversationMenu } from '@/features/home/conversationMenu';
 import { cn } from '@/lib/cn';
 import { openContextMenu } from '@/lib/openContextMenu';
@@ -23,11 +23,31 @@ const itemClass =
 
 function ConversationList({ onNavigate }: { onNavigate: () => void }) {
 	const { data: conversations = [] } = useConversations();
+	const pinned = conversations.filter((c) => c.pinned);
+	const others = conversations.filter((c) => !c.pinned);
+
+	return (
+		<>
+			<ConversationSection title='Fixadas' conversations={pinned} onNavigate={onNavigate} />
+			<ConversationSection title='Recentes' conversations={others} onNavigate={onNavigate} />
+		</>
+	);
+}
+
+function ConversationSection({
+	title,
+	conversations,
+	onNavigate,
+}: {
+	title: string;
+	conversations: ConversationSummary[];
+	onNavigate: () => void;
+}) {
 	if (!conversations.length) return null;
 
 	return (
-		<nav aria-label='Conversas' className='flex flex-col gap-0.5'>
-			<h2 className='px-2 pt-2 pb-1 text-xs text-muted-foreground'>Conversas</h2>
+		<nav aria-label={title} className='flex flex-col gap-0.5'>
+			<h2 className='px-2 pt-2 pb-1 text-xs font-semibold text-muted-foreground'>{title}</h2>
 			{conversations.map((c) => (
 				<ConversationMenu key={c.id} conversation={c}>
 					<div className='group relative'>
@@ -41,10 +61,7 @@ function ConversationList({ onNavigate }: { onNavigate: () => void }) {
 								)
 							}
 						>
-							<span className='flex items-center gap-1.5'>
-								{c.pinned && <Icon icon='pin' size='xs' className='shrink-0 text-muted-foreground' />}
-								<span className='truncate'>{c.title || 'Sem título'}</span>
-							</span>
+							<span className='truncate'>{c.title || 'Sem título'}</span>
 							{c.projects.length > 0 && (
 								<span className='truncate text-xs text-muted-foreground'>
 									{c.projects.map((p) => p.name).join(', ')}

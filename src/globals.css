@@ -18,6 +18,106 @@
 @source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}success/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
 @source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}warning/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
 
+/* Plus Jakarta Sans */
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraLight.ttf') format('truetype');
+	font-weight: 200;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraLightItalic.ttf') format('truetype');
+	font-weight: 200;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Light.ttf') format('truetype');
+	font-weight: 300;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-LightItalic.ttf') format('truetype');
+	font-weight: 300;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Regular.ttf') format('truetype');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Italic.ttf') format('truetype');
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Medium.ttf') format('truetype');
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-MediumItalic.ttf') format('truetype');
+	font-weight: 500;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-SemiBold.ttf') format('truetype');
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-SemiBoldItalic.ttf') format('truetype');
+	font-weight: 600;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Bold.ttf') format('truetype');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-BoldItalic.ttf') format('truetype');
+	font-weight: 700;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraBold.ttf') format('truetype');
+	font-weight: 800;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraBoldItalic.ttf') format('truetype');
+	font-weight: 800;
+	font-style: italic;
+	font-display: swap;
+}
+
 :root {
 	/* base */
 	--primary: oklch(100% 0.00011 271.152);
@@ -79,7 +179,8 @@
 	--color-info: var(--info);
 	--color-info-foreground: var(--info-foreground);
 
-	--font-body: var(--font-sen), ui-sans-serif, system-ui, sans-serif;
+	--font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+	--font-body: var(--font-sans);
 	--font-display: var(--font-playfair), ui-serif, Georgia, serif;
 
 	--color-border: var(--border);
@@ -101,7 +202,7 @@
 
 @layer base {
 	body {
-		@apply m-0 box-border tracking-wide bg-background text-foreground;
+		@apply m-0 box-border tracking-normal bg-background text-foreground;
 	}
 
 	/* html prefix beats plugin's `*` reset */
