@@ -1,0 +1,244 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@plugin 'tailwind-scrollbar';
+
+@import 'tailwindcss';
+
+/* Safelist de cores primary, info, destructive */
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}primary');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}primary-foreground');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}info');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}info-foreground');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}destructive');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}success');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}warning');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}primary/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}info/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}destructive/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}success/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+@source inline('{bg-,text-,border-,ring-,fill-,shadow-,stroke-}warning/{5,10,15,20,25,30,40,50,60,70,75,80,90,95}');
+
+/* Plus Jakarta Sans */
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraLight.ttf') format('truetype');
+	font-weight: 200;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraLightItalic.ttf') format('truetype');
+	font-weight: 200;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Light.ttf') format('truetype');
+	font-weight: 300;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-LightItalic.ttf') format('truetype');
+	font-weight: 300;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Regular.ttf') format('truetype');
+	font-weight: 400;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Italic.ttf') format('truetype');
+	font-weight: 400;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Medium.ttf') format('truetype');
+	font-weight: 500;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-MediumItalic.ttf') format('truetype');
+	font-weight: 500;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-SemiBold.ttf') format('truetype');
+	font-weight: 600;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-SemiBoldItalic.ttf') format('truetype');
+	font-weight: 600;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-Bold.ttf') format('truetype');
+	font-weight: 700;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-BoldItalic.ttf') format('truetype');
+	font-weight: 700;
+	font-style: italic;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraBold.ttf') format('truetype');
+	font-weight: 800;
+	font-style: normal;
+	font-display: swap;
+}
+@font-face {
+	font-family: 'Plus Jakarta Sans';
+	src: url('./assets/fonts/jakarta/PlusJakartaSans-ExtraBoldItalic.ttf') format('truetype');
+	font-weight: 800;
+	font-style: italic;
+	font-display: swap;
+}
+
+:root {
+	/* base */
+	--primary: oklch(100% 0.00011 271.152);
+	--primary-foreground: oklch(0% 0 0);
+	--background: oklch(0% 0 0);
+
+	--background-soft: oklch(24.314% 0.00184 106.772);
+	--foreground: oklch(0.96 0.008 90);
+
+	--muted: oklch(32.124% 0.00551 271.251);
+	--muted-foreground: oklch(81.699% 0.00309 264.745);
+
+	/* surfaces */
+	--card: oklch(26.448% 0.00003 271.152);
+	--card-border: oklch(0.95 0.02 90 / 0.08);
+	--ring: oklch(0.86 0.1 84 / 0.5);
+	--border: oklch(95% 0.01955 87.501 / 0.144);
+
+	--popover: oklch(29.313% 0.00003 271.152);
+	--popover-foreground: oklch(0.985 0.002 247.839);
+
+	--destructive: oklch(64.501% 0.21541 16.421);
+	--warning: oklch(70.485% 0.18669 47.592);
+	--success: oklch(77.296% 0.15348 163.254);
+	--info: oklch(0.141 0.005 285.823);
+	--info-foreground: oklch(100% 0.00011 271.152);
+
+	/* shadcn compat */
+	--input: oklch(29.82% 0.00143 15.934);
+	--input-foreground: oklch(0.96 0.008 90);
+
+	--accent: oklch(24.884% 0.0015 16.221);
+	--accent-foreground: oklch(100% 0.00011 271.152);
+}
+
+@theme inline {
+	--color-primary: var(--primary);
+	--color-primary-foreground: var(--primary-foreground);
+
+	--color-background: var(--background);
+	--color-background-soft: var(--background-soft);
+	--color-foreground: var(--foreground);
+	--color-muted: var(--muted);
+	--color-muted-foreground: var(--muted-foreground);
+
+	--color-card: var(--card);
+	--color-card-border: var(--card-border);
+	--color-ring: var(--ring);
+	--color-popover: var(--popover);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-input: var(--input);
+	--color-input-foreground: var(--input-foreground);
+	--color-accent: var(--accent);
+	--color-accent-foreground: var(--accent-foreground);
+
+	--color-destructive: var(--destructive);
+	--color-warning: var(--warning);
+	--color-success: var(--success);
+	--color-info: var(--info);
+	--color-info-foreground: var(--info-foreground);
+
+	--font-sans: 'Plus Jakarta Sans', ui-sans-serif, system-ui, sans-serif;
+	--font-body: var(--font-sans);
+	--font-display: var(--font-playfair), ui-serif, Georgia, serif;
+
+	--color-border: var(--border);
+
+	--animate-shiny-text: shiny-text 8s infinite;
+
+	@keyframes shiny-text {
+		0%,
+		90%,
+		100% {
+			background-position: calc(-100% - var(--shiny-width)) 0;
+		}
+		30%,
+		60% {
+			background-position: calc(100% + var(--shiny-width)) 0;
+		}
+	}
+}
+
+@layer base {
+	body {
+		@apply m-0 box-border tracking-normal bg-background text-foreground;
+	}
+
+	/* html prefix beats plugin's `*` reset */
+	html,
+	html * {
+		@apply scrollbar-thin scrollbar-track-transparent scrollbar-thumb-neutral-600;
+	}
+}
+
+.animate-spinner-rotate {
+	animation: spinner-rotate 1.4s linear infinite;
+}
+
+.animate-spinner-dash {
+	animation: spinner-dash 1.4s ease-in-out infinite;
+}
+
+@keyframes spinner-rotate {
+	100% {
+		transform: rotate(360deg);
+	}
+}
+
+@keyframes spinner-dash {
+	0% {
+		stroke-dasharray: 1, 150;
+		stroke-dashoffset: 0;
+	}
+
+	50% {
+		stroke-dasharray: 90, 150;
+		stroke-dashoffset: -35;
+	}
+
+	100% {
+		stroke-dasharray: 90, 150;
+		stroke-dashoffset: -124;
+	}
+}
