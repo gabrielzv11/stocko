@@ -1,4 +1,4 @@
-# Self-hosted Stocko: Postgres + API + front. Secrets in service/.env (see README).
+# Self-hosted Stocko: Postgres + API + front. Secrets in .env (see README).
 # Other hosts: set API_URL and APP_URL to the public URLs, e.g. API_URL=https://api.example.com docker compose up -d --build
 services:
   db:
@@ -17,7 +17,7 @@ services:
 
   service:
     build: ./service
-    env_file: ./service/.env
+    env_file: ./.env
     environment:
       DATABASE_URL: postgresql://stocko:stocko@db:5432/stocko
       FRONTEND_URL: ${APP_URL:-http://localhost:5003}

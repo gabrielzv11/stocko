@@ -14,13 +14,13 @@ Open-source e self-hosted: você roda a instância, cria o próprio GitHub App e
 Requisitos: Docker e uma chave do [OpenRouter](https://openrouter.ai/keys).
 
 ```sh
-cp service/.env.example service/.env
-cd service && bun install && bun run setup:github --api http://localhost:8000 && cd ..
+cp service/.env.example .env
+bun service/scripts/setup-github.ts --api http://localhost:8000
 ```
 
-O `setup:github` abre o GitHub com o App já configurado: você só confirma o nome, e ele grava as credenciais no `service/.env`. Para criar o App numa organização, use `--org <org>`. O nome precisa ser único no GitHub; troque com `--name "Stocko (Acme)"`.
+O `setup:github` abre o GitHub com o App já configurado: você só confirma o nome, e ele grava as credenciais no `.env` da raiz. Para criar o App numa organização, use `--org <org>`. O nome precisa ser único no GitHub; troque com `--name "Stocko (Acme)"`.
 
-No `service/.env`, preencha também:
+No `.env`, preencha também:
 
 - `ALLOWED_GITHUB_LOGINS`: seu login do GitHub (veja [Acesso e workspaces](#acesso-e-workspaces)).
 - `OPENROUTER_API_KEY`.
