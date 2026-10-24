@@ -126,3 +126,32 @@ test('share: token per conversation of the own workspace; public view has only t
 		await db.user.delete({ where: { id: user.id } });
 	}
 });
+
+test('patch: renames and pins only conversations of the own workspace, without moving them in the list', async () => {
+	const user = await db.user.create({
+		data: { name: 'test', memberships: { create: { workspace: { create: { name: 'test' } } } } },
+		include: { memberships: true },
+	});
+	const workspaceId = user.memberships[0]!.workspaceId;
+	const other = await db.workspace.create({ data: { name: 'other' } });
+	const token = crypto.randomUUID();
+	await db.session.create({ data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
+	const patch = async (id: string, body: unknown) =>
+		(await chat.request(`/conversations/${id}`, { method: 'PATCH', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).status;
+
+	try {
+		const conversation = await db.conversation.create({ data: { workspaceId, title: 'Antigo' } });
+		const foreign = await db.conversation.create({ data: { workspaceId: other.id, title: 'Outro' } });
+
+		expect(await patch(conversation.id, { title: '  Novo  ', pinned: true })).toBe(204);
+		const saved = await db.conversation.findUniqueOrThrow({ where: { id: conversation.id } });
+		expect(saved).toMatchObject({ title: 'Novo', pinned: true, updatedAt: conversation.updatedAt });
+
+		expect(await patch(conversation.id, { title: '   ' })).toBe(400);
+		expect(await patch(foreign.id, { pinned: true })).toBe(404);
+		expect((await db.conversation.findUniqueOrThrow({ where: { id: foreign.id } })).pinned).toBe(false);
+	} finally {
+		await db.workspace.deleteMany({ where: { id: { in: [workspaceId, other.id] } } });
+		await db.user.delete({ where: { id: user.id } });
+	}
+});

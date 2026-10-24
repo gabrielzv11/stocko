@@ -109,6 +109,18 @@ chat.get('/conversations/:id', requireAuth, async (c) => {
 	return c.json({ ...conversation, messages });
 });
 
+const patchBody = z.object({ title: z.string().trim().min(1).max(MAX_TITLE).optional(), pinned: z.boolean().optional() });
+
+chat.patch('/conversations/:id', requireAuth, async (c) => {
+	const body = patchBody.safeParse(await c.req.json().catch(() => null));
+	if (!body.success) return c.json({ error: 'invalid_body' }, 400);
+	const conversation = await db.conversation.findFirst({ where: { id: c.req.param('id'), workspaceId: c.var.workspaceId }, select: { id: true, updatedAt: true } });
+	if (!conversation) return c.json({ error: 'not_found' }, 404);
+	// Same updatedAt: renaming or pinning doesn't move the conversation in the list.
+	await db.conversation.update({ where: { id: conversation.id }, data: { ...body.data, updatedAt: conversation.updatedAt } });
+	return c.body(null, 204);
+});
+
 // ---------- share: public read-only link ----------
 
 const ownConversation = (workspaceId: string, id: string) => db.conversation.findFirst({ where: { id, workspaceId }, select: { id: true, shareToken: true } });
