@@ -1,0 +1,271 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+  runtime  = "bun"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------- auth ----------
+
+model User {
+  id          String       @id @default(cuid())
+  name        String?
+  avatarUrl   String?
+  createdAt   DateTime     @default(now())
+  identities  Identity[]
+  sessions    Session[]
+  memberships Member[]
+}
+
+/// Login provider link. Future host IdP becomes another provider.
+model Identity {
+  id       String @id @default(cuid())
+  userId   String
+  provider String // 'github'
+  subject  String // provider user id
+  login    String?
+  user     User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, subject])
+}
+
+/// Opaque bearer token; only its sha256 is stored.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  /// Active workspace (switcher). Null or no longer a member = the user's first workspace.
+  workspaceId String?
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace  Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+}
+
+/// CSRF state for OAuth login and GitHub App install flows.
+model OAuthState {
+  state     String   @id
+  kind      String // 'login' | 'install'
+  userId    String?
+  expiresAt DateTime
+}
+
+// ---------- tenancy ----------
+
+model Workspace {
+  id            String         @id @default(cuid())
+  name          String
+  /// LLM do agente: 'openrouter' (chave do env) ou 'mangaba' (chave do workspace).
+  llmProvider   String         @default("openrouter")
+  /// Null = padrão do provedor (LLM_MODEL / mangaba-titan).
+  llmModel      String?
+  /// Mangaba Router key (mr-...), AES-GCM sealed (apis.ts). Never returned by the API.
+  mangabaApiKey String?
+  createdAt     DateTime       @default(now())
+  members       Member[]
+  invites       Invite[]
+  sessions      Session[]
+  installations Installation[]
+  repositories  Repository[]
+  projects      Project[]
+  conversations Conversation[]
+}
+
+model Member {
+  workspaceId String
+  userId      String
+  /// 'owner' (created the workspace; invites and removes) | 'member' (joined by invite)
+  role        String    @default("owner")
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+/// Pending invite by GitHub login; accepted (and deleted) on that user's next sign-in. Also lets them past ALLOWED_GITHUB_LOGINS.
+model Invite {
+  id          String    @id @default(cuid())
+  workspaceId String
+  /// Lowercase GitHub login.
+  login       String
+  createdAt   DateTime  @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, login])
+  @@index([login])
+}
+
+// ---------- github ----------
+
+model Installation {
+  id                   String       @id @default(cuid())
+  workspaceId          String
+  githubInstallationId BigInt       @unique
+  accountLogin         String
+  createdAt            DateTime     @default(now())
+  workspace            Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  repositories         Repository[]
+}
+
+/// One clone per repository per workspace, shared by N projects.
+model Repository {
+  id             String          @id @default(cuid())
+  workspaceId    String
+  installationId String
+  githubRepoId   BigInt
+  fullName       String
+  defaultBranch  String
+  sizeKb         Int?
+  createdAt      DateTime        @default(now())
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  installation   Installation    @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  branches       RepoBranch[]
+  sources        ProjectSource[]
+
+  @@unique([workspaceId, githubRepoId])
+}
+
+enum BranchStatus {
+  pending
+  syncing
+  ready
+  error
+}
+
+/// Observed branch. Lower priority value = higher precedence in the cascade.
+model RepoBranch {
+  id            String       @id @default(cuid())
+  repositoryId  String
+  name          String
+  priority      Int
+  status        BranchStatus @default(pending)
+  lastSyncedSha String?
+  error         String?
+  updatedAt     DateTime     @updatedAt
+  repository    Repository   @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryId, name])
+  @@index([status])
+}
+
+// ---------- projects ----------
+
+model Project {
+  id            String          @id @default(cuid())
+  workspaceId   String
+  name          String
+  createdAt     DateTime        @default(now())
+  workspace     Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  sources       ProjectSource[]
+  apis          ApiSpec[]
+  conversations Conversation[]
+
+  @@index([workspaceId])
+}
+
+/// OpenAPI/Swagger spec the agent can search and, with baseUrl, call (GET only).
+model ApiSpec {
+  id          String   @id @default(cuid())
+  projectId   String
+  title       String
+  /// What the API is (e.g. "Prometheus do cluster de produção").
+  description String
+  /// When/how the agent should use it (e.g. "lentidão: histogram_quantile em http_request_duration_seconds").
+  usage       String
+  /// Null = documentation only.
+  baseUrl     String?
+  /// "Header-Name: value", AES-GCM sealed (apis.ts). Never returned by the API.
+  authHeader  String?
+  spec        Json
+  createdAt   DateTime @default(now())
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
+
+enum SourceType {
+  github_repo
+  doc
+  jira
+}
+
+model ProjectSource {
+  id           String      @id @default(cuid())
+  projectId    String
+  type         SourceType
+  repositoryId String?
+  /// doc: { title }. jira: { baseUrl, email, jql, token (AES-GCM sealed, never returned) }.
+  config       Json?
+  /// doc/jira: 'syncing' | 'ready' | 'error' (repos track it per branch).
+  status       String?
+  error        String?
+  syncedAt     DateTime?
+  createdAt    DateTime    @default(now())
+  project      Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  repository   Repository? @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+  chunks       Chunk[]
+
+  @@unique([projectId, repositoryId])
+}
+
+/// Searchable piece of a doc or Jira source: Postgres full-text ('portuguese') over title + content, see knowledge.ts.
+model Chunk {
+  id        String        @id @default(cuid())
+  sourceId  String
+  /// Citation: "doc title § section" or the Jira key.
+  ref       String
+  title     String
+  url       String?
+  content   String
+  source    ProjectSource @relation(fields: [sourceId], references: [id], onDelete: Cascade)
+
+  @@index([sourceId])
+}
+
+// ---------- chat ----------
+
+/// Belongs to the workspace; projects are linked by the agent (link_projects) only when the question is clearly about them.
+model Conversation {
+  id                       String    @id @default(cuid())
+  workspaceId              String
+  title                    String?
+  pinned                   Boolean   @default(false)
+  summary                  String?
+  summarizedUntilMessageId String?
+  /// Public read-only link (/shared/:token, answers' text only). Null = not shared; revoking clears it.
+  shareToken               String?   @unique
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+  workspace                Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  projects                 Project[]
+  messages                 Message[]
+
+  @@index([workspaceId, updatedAt])
+}
+
+/// parts = AI SDK UIMessage parts (text, tool calls, citations).
+model Message {
+  id             String       @id @default(cuid())
+  conversationId String
+  role           String
+  parts          Json
+  /// Usage of the agent turn (assistant messages only), summed over its steps.
+  model          String?
+  inputTokens    Int?
+  outputTokens   Int?
+  cachedTokens   Int?
+  /// USD charged by OpenRouter. Null on other providers (they don't report cost).
+  cost           Decimal?     @db.Decimal(12, 6)
+  /// 👍 = 1, 👎 = -1 (assistant messages). Base for the eval set.
+  feedback       Int?
+  createdAt      DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+}
