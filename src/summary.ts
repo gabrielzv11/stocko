@@ -25,6 +25,26 @@ const textOf = (parts: unknown) =>
 		.map((p) => p.text)
 		.join('\n');
 
+/**
+ * Replaces the provisional title (question truncated) with a short one written by the model. Background, first turn only;
+ * on failure or empty output the provisional title stays.
+ */
+export async function titleConversation(conversationId: string, question: string, model: LanguageModel, maxLength: number) {
+	try {
+		// ponytail: mesmo modelo do workspace e custo fora do teto diário, como o resumo; modelo barato dedicado se pesar.
+		const { text } = await generateText({
+			model,
+			system:
+				'Escreva um título curto (até 6 palavras) em português do Brasil para uma conversa que começa com a pergunta abaixo. Responda só com o título, sem aspas nem ponto final.',
+			prompt: question.slice(0, 2000),
+		});
+		const title = text.replace(/\s+/g, ' ').replace(/^["'`*#\s]+|["'`*.\s]+$/g, '').slice(0, maxLength);
+		if (title) await db.conversation.update({ where: { id: conversationId }, data: { title } });
+	} catch (e) {
+		console.error(`[title] ${conversationId}:`, e);
+	}
+}
+
 // ponytail: in-process (1 réplica); Inngest com concorrência 1 por conversa se houver várias.
 const running = new Set<string>();
 
