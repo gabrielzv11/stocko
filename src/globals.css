@@ -28,7 +28,7 @@
 	--foreground: oklch(0.96 0.008 90);
 
 	--muted: oklch(32.124% 0.00551 271.251);
-	--muted-foreground: oklch(0.74 0.018 264);
+	--muted-foreground: oklch(81.699% 0.00309 264.745);
 
 	/* surfaces */
 	--card: oklch(26.448% 0.00003 271.152);
@@ -49,8 +49,8 @@
 	--input: oklch(29.82% 0.00143 15.934);
 	--input-foreground: oklch(0.96 0.008 90);
 
-	--accent: oklch(52.081% 0.00006 271.152);
-	--accent-foreground: oklch(24.884% 0.0015 16.221);
+	--accent: oklch(24.884% 0.0015 16.221);
+	--accent-foreground: oklch(100% 0.00011 271.152);
 }
 
 @theme inline {

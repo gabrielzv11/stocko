@@ -5,7 +5,7 @@ import { Icon } from '@/components/ui/icons';
 import { cn } from '@/lib/cn';
 import { motion } from 'motion/react';
 import { DndContext, PointerSensor, pointerWithin, useSensor, useSensors } from '@dnd-kit/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Feedback } from './feedback';
 import { Gutters, SelectionMenu, type Pin, type Selected, type Side, type SlotData } from './pins';
 import { Markdown } from './serializer';
@@ -84,16 +84,11 @@ function useReveal(length: number, animate: boolean) {
 
 // Aberto enquanto o agente trabalha (e até o raciocínio terminar de aparecer); recolhe sozinho depois.
 function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
-	const listRef = useRef<HTMLUListElement>(null);
 	const total = items.reduce((n, item) => n + (item.type === 'reasoning' ? item.text.length : 0), 0);
 	const shown = useReveal(total, live);
 	const revealing = shown < total;
 	const steps = items.filter((item) => item.type === 'step').length;
 	const summary = live || revealing ? 'Trabalhando…' : steps ? `Consultou o código · ${steps} ${steps === 1 ? 'passo' : 'passos'}` : 'Raciocínio';
-
-	useEffect(() => {
-		if (revealing) listRef.current?.scrollIntoView({ block: 'end' });
-	}, [shown, revealing]);
 
 	// Itens depois de um raciocínio ainda incompleto esperam, para manter a ordem.
 	let budget = shown;
@@ -113,7 +108,7 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 				<Icon icon='chevron-right' size='xs' className='transition-transform group-open:rotate-90' />
 				{summary}
 			</summary>
-			<ul ref={listRef} className='border-border mt-2 ml-1.5 flex flex-col gap-1.5 border-l pl-3'>
+			<ul className='border-border mt-2 ml-1.5 flex flex-col gap-1.5 border-l pl-3'>
 				{visible.map((item, i) =>
 					item.type === 'step' ? (
 						<li key={item.id} className='flex items-center gap-2'>
@@ -141,7 +136,9 @@ function ActivityLog({ items, live }: { items: Activity[]; live: boolean }) {
 }
 
 function Conversation({ messages, typing, onAsk, readOnly, className, ...props }: Props) {
-	const endRef = useRef<HTMLDivElement>(null);
+	const contentRef = useRef<HTMLDivElement>(null);
+	// Acompanha o fim só enquanto o usuário está lá; rolar para cima solta.
+	const stick = useRef(true);
 	const [selected, setSelected] = useState<Selected | null>(null);
 	const [pins, setPins] = useState<Pin[]>([]);
 	// Estado (não ref): o menu recebe os elementos como props no render.
@@ -156,11 +153,24 @@ function Conversation({ messages, typing, onAsk, readOnly, className, ...props }
 	const tail = last?.parts.at(-1);
 	// "Digitando" até algo chegar, e de novo entre um passo concluído e o próximo pedaço do modelo
 	const waiting = typing && (last?.role === 'user' || (tail?.type === 'step' && tail.done));
-	const tailSize = tail?.type === 'step' ? tail.label.length : tail?.text.length;
 
+	// Qualquer crescimento (chunks, reveal do raciocínio, diagramas carregando) segue o fim se grudado.
 	useEffect(() => {
-		endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-	}, [messages.length, last?.parts.length, tailSize, waiting]);
+		if (!scroller || !contentRef.current) return;
+		const observer = new ResizeObserver(() => {
+			if (stick.current) scroller.scrollTo({ top: scroller.scrollHeight });
+		});
+		observer.observe(contentRef.current);
+		return () => observer.disconnect();
+	}, [scroller]);
+
+	// Pergunta enviada: volta a acompanhar, mesmo se estava lendo lá em cima.
+	const lastRole = last?.role;
+	useLayoutEffect(() => {
+		if (lastRole !== 'user' || !scroller) return;
+		stick.current = true;
+		scroller.scrollTo({ top: scroller.scrollHeight });
+	}, [messages.length, lastRole, scroller]);
 
 	// Contorno no bloco selecionado por clique (não há seleção nativa para mostrar).
 	const block = selected?.block;
@@ -233,10 +243,14 @@ function Conversation({ messages, typing, onAsk, readOnly, className, ...props }
 					// Gutter dos dois lados: centro da coluna bate com o do input flutuante (centrado no container todo).
 					ref={setScroller}
 					className='min-h-0 flex-1 [scrollbar-gutter:stable_both-edges] overflow-y-auto'
+					onScroll={(e) => {
+						const el = e.currentTarget;
+						stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+					}}
 					onPointerDown={(e) => (down.current = { x: e.clientX, y: e.clientY })}
 					onPointerUp={select}
 				>
-					<div className='mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-40'>
+					<div ref={contentRef} className='mx-auto flex w-full max-w-3xl flex-col gap-6 px-4 pt-6 pb-40'>
 						{messages.map((message) => {
 							if (message.role === 'user') {
 								const { quote, text } = splitQuote(textOf(message));
@@ -285,8 +299,6 @@ function Conversation({ messages, typing, onAsk, readOnly, className, ...props }
 								))}
 							</div>
 						)}
-
-						<div ref={endRef} />
 					</div>
 				</div>
 

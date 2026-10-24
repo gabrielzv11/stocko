@@ -2,7 +2,9 @@ import { IconButton } from '@/components/ui/iconButton';
 import { Icon } from '@/components/ui/icons';
 import { Text } from '@/components/ui/text';
 import { useConversations } from '@/features/home/api';
+import { ConversationMenu } from '@/features/home/conversationMenu';
 import { cn } from '@/lib/cn';
+import { openContextMenu } from '@/lib/openContextMenu';
 import { NavLink } from 'react-router-dom';
 import { Profile } from '../profile';
 import { navItems } from './navItems';
@@ -27,24 +29,38 @@ function ConversationList({ onNavigate }: { onNavigate: () => void }) {
 		<nav aria-label='Conversas' className='flex flex-col gap-0.5'>
 			<h2 className='px-2 pt-2 pb-1 text-xs text-muted-foreground'>Conversas</h2>
 			{conversations.map((c) => (
-				<NavLink
-					key={c.id}
-					to={`/c/${c.id}`}
-					onClick={onNavigate}
-					className={({ isActive }) =>
-						cn(
-							'flex flex-col rounded-lg px-2 py-1.5 text-sm transition-colors hover:bg-card',
-							isActive && 'bg-card'
-						)
-					}
-				>
-					<span className='truncate'>{c.title || 'Sem título'}</span>
-					{c.projects.length > 0 && (
-						<span className='truncate text-xs text-muted-foreground'>
-							{c.projects.map((p) => p.name).join(', ')}
-						</span>
-					)}
-				</NavLink>
+				<ConversationMenu key={c.id} conversation={c}>
+					<div className='group relative'>
+						<NavLink
+							to={`/c/${c.id}`}
+							onClick={onNavigate}
+							className={({ isActive }) =>
+								cn(
+									'flex flex-col rounded-lg py-1.5 pr-8 pl-2 text-sm transition-colors group-data-[state=open]:bg-card hover:bg-card',
+									isActive && 'bg-card'
+								)
+							}
+						>
+							<span className='flex items-center gap-1.5'>
+								{c.pinned && <Icon icon='pin' size='xs' className='shrink-0 text-muted-foreground' />}
+								<span className='truncate'>{c.title || 'Sem título'}</span>
+							</span>
+							{c.projects.length > 0 && (
+								<span className='truncate text-xs text-muted-foreground'>
+									{c.projects.map((p) => p.name).join(', ')}
+								</span>
+							)}
+						</NavLink>
+						<button
+							type='button'
+							aria-label='Opções da conversa'
+							onClick={openContextMenu}
+							className='absolute top-1.5 right-1 rounded-md p-1 text-muted-foreground transition-opacity outline-none group-hover:opacity-100 group-data-[state=open]:opacity-100 hover:text-foreground focus-visible:opacity-100 md:opacity-0'
+						>
+							<Icon icon='ellipsis-vertical' size='sm' />
+						</button>
+					</div>
+				</ConversationMenu>
 			))}
 		</nav>
 	);
