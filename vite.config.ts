@@ -18,7 +18,6 @@ export default defineConfig(({ mode, command }) => {
 			dedupe: ['react', 'react-dom', '@tanstack/react-query'],
 		},
 		server: {
-			port: 5003,
 			strictPort: true,
 		},
 		build: {
@@ -28,23 +27,24 @@ export default defineConfig(({ mode, command }) => {
 		plugins: [
 			react(),
 			tailwindcss(),
-			withFederation && federation({
-				name: 'stocko',
-				manifest: true,
-				exposes: {
-					'./home': './src/features/home/index.tsx',
-				},
-				shared: {
-					react: { singleton: true, requiredVersion: '^19.0.0' },
-					'react-dom': { singleton: true, requiredVersion: '^19.0.0' },
-					'react-router-dom': { singleton: true, requiredVersion: '^7.0.0' },
-					'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' },
-					axios: {},
-					dayjs: {},
-					sonner: {},
-				},
-				dts: false,
-			}),
+			withFederation &&
+				federation({
+					name: 'stocko',
+					manifest: true,
+					exposes: {
+						'./home': './src/features/home/index.tsx',
+					},
+					shared: {
+						react: { singleton: true, requiredVersion: '^19.0.0' },
+						'react-dom': { singleton: true, requiredVersion: '^19.0.0' },
+						'react-router-dom': { singleton: true, requiredVersion: '^7.0.0' },
+						'@tanstack/react-query': { singleton: true, requiredVersion: '^5.0.0' },
+						axios: {},
+						dayjs: {},
+						sonner: {},
+					},
+					dts: false,
+				}),
 		],
 	};
 });
