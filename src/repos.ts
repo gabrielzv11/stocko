@@ -140,16 +140,15 @@ async function doSync(repositoryId: string) {
 	}
 }
 
-// ponytail: re-sync por idade a cada chat; webhook push + cron de reconciliação substituem isso.
-const STALE_MS = 10 * 60_000;
-
-/** Kick a background sync for repos never synced, pending, or with a branch older than STALE_MS (failed ones too). Doesn't wait. */
-export async function refreshStale(repositoryIds: string[]) {
+/**
+ * Kick a background sync for repos never synced or with a pending branch (sync cut by a restart). Doesn't wait.
+ * Updates come only from the push webhook or the manual sync: no re-sync by age.
+ */
+export async function syncPending(repositoryIds: string[]) {
 	const branches = await db.repoBranch.findMany({ where: { repositoryId: { in: repositoryIds } } });
 	for (const id of repositoryIds) {
 		const own = branches.filter((b) => b.repositoryId === id);
-		const stale = own.some((b) => b.status === 'pending' || (b.status !== 'syncing' && Date.now() - b.updatedAt.getTime() > STALE_MS));
-		if (!own.length || stale) void syncRepo(id);
+		if (!own.length || own.some((b) => b.status === 'pending')) void syncRepo(id);
 	}
 }
 

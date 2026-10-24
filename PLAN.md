@@ -14,7 +14,7 @@ Arquitetura de busca híbrida:
 | HTTP | Hono |
 | Banco | Postgres + Prisma; pgvector habilitado (sem uso no MVP) |
 | LLM | OpenRouter via Vercel AI SDK (`ai` + `@openrouter/ai-sdk-provider`), modelo em `LLM_MODEL` |
-| Jobs | Inngest (modo `connect`) |
+| Jobs | Em memória, no processo (1 réplica) |
 | GitHub | GitHub App (login + token de instalação + webhooks) |
 | Deploy | Railway, 1 réplica, volume em `/data/repos` |
 
@@ -48,14 +48,14 @@ Conversation 1─N Message { role, parts jsonb }
 - Branch deletada no GitHub → `status=error`, aviso no front, source mantida.
 - Citações usam `lastSyncedSha` (links estáveis).
 
-## Sync (Inngest)
+## Sync (fila em memória)
 
-- `repo/branch.sync.requested { repoId, branch }`: concorrência 1 por repo, debounce 30s por branch, retry nativo.
-- Webhook `push` (HMAC validado na nossa rota) → evento. Só branches observadas.
-- Webhook `installation_repositories.removed` → remove repo/clone.
-- Cron `*/30 * * * *`: reconcilia SHA remoto × `lastSyncedSha`.
+- `syncRepo(repoId)`: 1 por repo; pedidos durante um sync viram uma passada extra.
+- Gatilhos: **só webhook `push` ou sync manual** (`POST /repositories/:id/sync`), além de adicionar repo/branch. Sem cron nem re-sync por idade.
+- Webhook `push` (HMAC validado na nossa rota). Só branches observadas.
+- Webhook `installation_repositories.removed` / `installation.deleted` → remove repo/clone.
 - Sem lock entre sync e tools: fetch só acrescenta objetos e o SHA fica fixo por turno do agente. Tools só esperam o primeiro sync.
-- No boot: branches `syncing` → `pending`.
+- No boot: branches `syncing` → `pending`; o próximo chat que usa o repo dispara o sync.
 - Limite de tamanho por repo (`MAX_REPO_SIZE_MB`).
 
 ## Agente
@@ -81,7 +81,7 @@ System prompt (estável, primeiro, cacheável): projeto, repos, branches `ready`
 
 Contexto:
 - `MAX_STEPS=25`.
-- Resumo incremental quando `usage.inputTokens` > `CONTEXT_SUMMARY_THRESHOLD` (60% da janela): resume tudo exceto os 2 últimos turnos em `Conversation.summary`, preservando conclusões e citações. Roda após o turno via evento Inngest `conversation/summarize.requested` (concorrência 1 por conversa).
+- Resumo incremental quando `usage.inputTokens` > `CONTEXT_SUMMARY_THRESHOLD` (60% da janela): resume tudo exceto os 2 últimos turnos em `Conversation.summary`, preservando conclusões e citações. Roda após o turno, em segundo plano no processo (1 por conversa).
 - Montagem: system → `<conversation_summary>` → 2 últimos turnos completos → pergunta.
 - `Message.parts` completo persistido para UI.
 - Título da conversa gerado por chamada barata na primeira pergunta.
@@ -134,8 +134,6 @@ GET    /conversations/:id
 POST   /conversations/:id/messages     — stream (AI SDK UI message stream / useChat)
 PATCH  /conversations/:id              — { title?, pinned? }
 DELETE /conversations/:id
-
-/api/inngest
 ```
 
 ## Qualidade
@@ -152,7 +150,7 @@ RAG/docs/Jira/infra · convites e pin por usuário · fetch efêmero de branch a
 1. Scaffold: Hono + Bun, Prisma schema, env, Dockerfile, `/health`.
 2. Auth GitHub + sessão + allowlist + `requireAuth`.
 3. Instalação do App + `/github/repos` + `Repository`/`RepoBranch`.
-4. Sync git (Inngest) + webhooks + reconciliação.
+4. Sync git + webhooks.
 5. Tools do agente + sandbox + teste.
 6. Chat streaming + persistência + título.
 7. Resumo incremental.

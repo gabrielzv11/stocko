@@ -16,7 +16,7 @@ import { db } from './db';
 import { env } from './env';
 import { knowledgeTools, refreshStaleSources } from './knowledge';
 import type { Prisma } from './generated/prisma/client';
-import { refreshStale } from './repos';
+import { syncPending } from './repos';
 import { workspaceLlm } from './settings';
 import { summarize, titleConversation, unsummarized } from './summary';
 
@@ -210,7 +210,7 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 	const repos = [
 		...new Map(projects.flatMap((p) => p.sources.flatMap((s) => (s.repository ? [[s.repository.id, s.repository]] : [])))).values(),
 	];
-	await refreshStale(repos.map((r) => r.id));
+	await syncPending(repos.map((r) => r.id));
 	const knowledgeSources = projects.flatMap((p) => p.sources.filter((s) => s.type === 'doc' || s.type === 'jira'));
 	await refreshStaleSources(knowledgeSources.map((s) => s.id));
 
