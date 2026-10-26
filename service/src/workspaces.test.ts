@@ -121,6 +121,14 @@ test('workspaces: ALLOWED_GITHUB_LOGINS limits creation; rename; one installatio
 			expect((await post(token!, '/workspaces', { name: ' ' })).status).toBe(400);
 			const ids: string[] = [];
 			for (const name of ['A', 'B']) ids.push(((await (await post(token!, '/workspaces', { name })).json()) as { id: string }).id);
+			// Per-account limit: N workspaces would multiply the per-workspace daily cost cap.
+			const limit = env.MAX_WORKSPACES_PER_USER;
+			env.MAX_WORKSPACES_PER_USER = 2;
+			try {
+				expect((await post(token!, '/workspaces', { name: 'C' })).status).toBe(403);
+			} finally {
+				env.MAX_WORKSPACES_PER_USER = limit;
+			}
 			expect((await call(token!, '/workspace', { method: 'PATCH', body: JSON.stringify({ name: 'B2' }) })).status).toBe(204);
 			expect((await db.workspace.findUniqueOrThrow({ where: { id: ids[1] } })).name).toBe('B2');
 
