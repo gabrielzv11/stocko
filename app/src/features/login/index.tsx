@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button';
-import { loginUrl, setToken, takePendingInvite } from '@/lib/auth';
+import { getToken, setToken, startLogin, takeLoginStarted, takePendingInvite } from '@/lib/auth';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -14,6 +14,12 @@ export default function Login() {
 
 	useEffect(() => {
 		if (!token) return;
+		// Token que esta aba não pediu (link de terceiro, ou o retorno do "Conectar ao GitHub"): fica a sessão atual.
+		// `token === getToken()`: o StrictMode roda o efeito de novo depois de já aceito.
+		if (token !== getToken() && !takeLoginStarted()) {
+			navigate(getToken() ? '/' : '/login', { replace: true });
+			return;
+		}
 		setToken(token);
 		// Veio de um link de convite → aceita agora.
 		const invite = takePendingInvite();
@@ -31,7 +37,7 @@ export default function Login() {
 				</p>
 			)}
 			<div className='w-full max-w-xs'>
-				<Button onClick={() => window.location.assign(loginUrl)}>Entrar com GitHub</Button>
+				<Button onClick={startLogin}>Entrar com GitHub</Button>
 			</div>
 		</div>
 	);
