@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { installationToken } from './client';
+import { installationOctokit, installationToken } from './client';
 import { db } from './db';
 import { env } from './env';
 
@@ -69,6 +69,37 @@ export async function removeRepo(repositoryId: string) {
 // ponytail: remove once every deploy has booted past it.
 export const removeSharedZoekt = () => rm(path.resolve(env.REPOS_DIR, '.zoekt'), { recursive: true, force: true });
 
+const ACCESS_TTL_MS = 10 * 60_000;
+const accessCheckedAt = new Map<string, number>();
+export const REVOKED = 'Sem acesso no GitHub: repo removido da App, App desinstalada ou repo apagado.';
+
+/**
+ * Whether the App still reaches the repo on GitHub. Lost (404) → clone deleted and branches marked, so no tool reads
+ * code the workspace can't see anymore; the Repository row stays and a later sync re-clones if access comes back.
+ * Doesn't rely on the webhook. Any other failure (rate limit, outage) counts as access: only a 404 revokes.
+ * Checked at most every ACCESS_TTL_MS per repo, unless `fresh`.
+ */
+export async function checkAccess(repositoryId: string, { fresh = false } = {}) {
+	if (!fresh && (accessCheckedAt.get(repositoryId) ?? 0) > Date.now() - ACCESS_TTL_MS) return true;
+	const repo = await db.repository.findUnique({ where: { id: repositoryId }, include: { installation: true } });
+	if (!repo) return false;
+	const [owner = '', name = ''] = repo.fullName.split('/');
+	const status = await installationOctokit(Number(repo.installation.githubInstallationId))
+		.rest.repos.get({ owner, repo: name })
+		.then(
+			() => 200,
+			(e: { status?: number }) => e.status
+		);
+	if (status !== 404) {
+		accessCheckedAt.set(repositoryId, Date.now());
+		return true;
+	}
+	accessCheckedAt.delete(repositoryId);
+	await rm(repoDir(repositoryId), { recursive: true, force: true });
+	await db.repoBranch.updateMany({ where: { repositoryId }, data: { status: 'error', error: REVOKED, lastSyncedSha: null } });
+	return false;
+}
+
 /** Resolves when the running sync (if any) ends. Tools only need it before the first one. */
 export const waitForSync = (repositoryId: string) => inflight.get(repositoryId) ?? Promise.resolve();
 
@@ -81,6 +112,8 @@ async function doSync(repositoryId: string) {
 	const branches = repo.branches.length
 		? repo.branches
 		: [await db.repoBranch.create({ data: { repositoryId, name: repo.defaultBranch, priority: 0 } })];
+	// Fresh: about to talk to GitHub anyway; access lost → clone deleted, nothing to fetch.
+	if (!(await checkAccess(repositoryId, { fresh: true }))) return;
 	// updateMany: a branch removed mid-sync just matches nothing.
 	const mark = (ids: string[], data: { status: 'syncing' | 'ready' | 'error'; error?: string | null; lastSyncedSha?: string }) =>
 		db.repoBranch.updateMany({ where: { id: { in: ids } }, data });

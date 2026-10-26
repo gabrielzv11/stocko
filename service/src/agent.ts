@@ -109,7 +109,11 @@ export function agentTools(repos: Repo[]) {
 				db.repoBranch.findMany({ where: { repositoryId: repo.id, lastSyncedSha: { not: null } }, orderBy: { priority: 'asc' } });
 			let rows = await synced();
 			if (!rows.length) rows = await waitForSync(repo.id).then(synced);
-			if (!rows.length) throw new Error(`${repo.fullName} ainda não foi sincronizado; tente de novo em instantes.`);
+			if (!rows.length) {
+				// Revoked (checkAccess) or every branch failed: say why instead of "try again".
+				const failed = await db.repoBranch.findFirst({ where: { repositoryId: repo.id, status: 'error' }, select: { error: true } });
+				throw new Error(`${repo.fullName} ${failed?.error ? `indisponível: ${failed.error}` : 'ainda não foi sincronizado; tente de novo em instantes.'}`);
+			}
 			pinned.set(
 				repo.id,
 				rows.map((b) => ({ name: b.name, sha: b.lastSyncedSha! }))
