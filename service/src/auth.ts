@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import { createMiddleware } from 'hono/factory';
+import { installationOctokit } from './client';
 import { db } from './db';
 import { env } from './env';
 
@@ -18,6 +19,24 @@ const installPage = `https://github.com/apps/${env.GITHUB_APP_SLUG}/installation
 /** Who may create workspaces: everyone, or only ALLOWED_GITHUB_LOGINS when set. Anyone can join one by invite. */
 export const canCreateWorkspace = (login: string | null | undefined) =>
 	!env.ALLOWED_GITHUB_LOGINS.length || (!!login && env.ALLOWED_GITHUB_LOGINS.includes(login.toLowerCase()));
+
+/**
+ * The GitHub user can read every repo of the installation. /user/installations lists any installation the user reaches
+ * even one repo of, but the workspace lists repos with the installation's own token: linking a partial one would hand
+ * the workspace private repos the user can't read. Both counts come from GitHub; the user's is a subset of the App's.
+ * ponytail: checked at link time only; repos added to the installation later aren't re-checked.
+ */
+export async function seesWholeInstallation(installationId: number, headers: Record<string, string>) {
+	try {
+		const res = await fetch(`https://api.github.com/user/installations/${installationId}/repositories?per_page=1`, { headers });
+		if (!res.ok) return false;
+		const { total_count: mine } = (await res.json()) as { total_count: number };
+		const { data } = await installationOctokit(installationId).rest.apps.listReposAccessibleToInstallation({ per_page: 1 });
+		return mine === data.total_count;
+	} catch {
+		return false;
+	}
+}
 
 export const randomToken = () => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url');
 export const sha256 = (s: string) => new Bun.CryptoHasher('sha256').update(s).digest('hex');
@@ -125,7 +144,7 @@ auth.get('/auth/github/callback', async (c) => {
 				.userId
 		: (await db.user.create({ data: { ...profile, identities: { create: { provider: 'github', subject, login: gh.login } } } })).id;
 
-	// Links every App installation this GitHub user can access to the workspace that asked (/github/install), if they own it.
+	// Links every App installation this GitHub user can read in full to the workspace that asked (/github/install), if they own it.
 	// The installation_id GitHub appends to the setup URL is spoofable, so the user's own token is the source of truth.
 	// The same installation can serve N workspaces.
 	// ponytail: first 100 installations only; paginate if a user ever has more.
@@ -135,8 +154,11 @@ auth.get('/auth/github/callback', async (c) => {
 	const instRes = target && (await fetch('https://api.github.com/user/installations?per_page=100', { headers }));
 	if (target && instRes?.ok) {
 		const { installations } = (await instRes.json()) as { installations: { id: number; account: { login: string } }[] };
+		const whole = await Promise.all(installations.map((i) => seesWholeInstallation(i.id, headers)));
 		await db.installation.createMany({
-			data: installations.map((i) => ({ workspaceId: target.workspaceId, githubInstallationId: BigInt(i.id), accountLogin: i.account.login })),
+			data: installations
+				.filter((_, k) => whole[k])
+				.map((i) => ({ workspaceId: target.workspaceId, githubInstallationId: BigInt(i.id), accountLogin: i.account.login })),
 			skipDuplicates: true,
 		});
 	}
