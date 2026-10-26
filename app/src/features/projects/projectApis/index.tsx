@@ -71,7 +71,9 @@ function ProjectApis({ project }: { project: Project }) {
 								placeholder='Forma de uso: quando e como o agente deve consultar (ex.: lentidão → /api/v1/query com histogram_quantile)'
 							/>
 							<TextField name='baseUrl' type='url' placeholder='URL base para chamadas GET (vazio = só documentação)' />
-							{owner && <TextField name='authHeader' placeholder='Header de auth (ex.: Authorization: Bearer xxx), salvo criptografado' />}
+							{owner && (
+								<TextField name='authHeader' placeholder='Header de auth (ex.: Authorization: Bearer xxx), salvo criptografado' />
+							)}
 							<label className='text-muted-foreground flex flex-col gap-1 text-sm'>
 								Spec OpenAPI/Swagger (.json, .yaml)
 								<input type='file' name='specFile' accept='.json,.yaml,.yml' />
