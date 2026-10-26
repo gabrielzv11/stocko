@@ -30,16 +30,12 @@ function Card({ icon, title, description, children }: { icon: IconName; title: s
 	);
 }
 
-/** Pós-login sem workspace (ou "Novo workspace" no perfil): criar um ou entrar por convite. */
-export default function Onboarding() {
-	const { data: me } = useMe();
-
-	// Criado → já conecta o GitHub (o dono vincula as instalações e escolhe os repos).
+/** Cria o workspace e já conecta o GitHub (o dono vincula as instalações e escolhe os repos). */
+export function CreateWorkspaceForm() {
 	const create = useMutation({
 		mutationFn: (name: string) => api.post<{ id: string }>('/workspaces', { name }),
 		onSuccess: ({ data }) => window.location.assign(githubInstallUrl(data.id)),
 	});
-	const join = useMutation({ mutationFn: acceptInvite });
 
 	function handleCreate(e: React.SubmitEvent<HTMLFormElement>) {
 		e.preventDefault();
@@ -47,15 +43,46 @@ export default function Onboarding() {
 		if (name) create.mutate(name);
 	}
 
+	const createError = errorMessage(create.error);
+
+	return (
+		<form onSubmit={handleCreate} className='flex flex-col gap-2'>
+			<TextField name='name' size='sm' placeholder='Nome do workspace' maxLength={60} required autoComplete='off' />
+			{createError && <p className='text-sm text-red-500'>{createError}</p>}
+			<Button type='submit' size='sm' loading={create.isPending}>
+				Criar e conectar ao GitHub
+			</Button>
+		</form>
+	);
+}
+
+export function JoinWorkspaceForm() {
+	const join = useMutation({ mutationFn: acceptInvite });
+
 	function handleJoin(e: React.SubmitEvent<HTMLFormElement>) {
 		e.preventDefault();
 		const code = inviteCode(String(new FormData(e.currentTarget).get('code')));
 		if (code) join.mutate(code);
 	}
 
-	if (!me) return null;
-	const createError = errorMessage(create.error);
 	const joinError = errorMessage(join.error);
+
+	return (
+		<form onSubmit={handleJoin} className='flex flex-col gap-2'>
+			<TextField name='code' size='sm' placeholder='Link ou código do convite' required autoComplete='off' />
+			{joinError && <p className='text-sm text-red-500'>{joinError}</p>}
+			<Button type='submit' size='sm' loading={join.isPending}>
+				Entrar no workspace
+			</Button>
+		</form>
+	);
+}
+
+/** Pós-login sem workspace: criar um ou entrar por convite. */
+export default function Onboarding() {
+	const { data: me } = useMe();
+
+	if (!me) return null;
 
 	return (
 		<div className='flex min-h-dvh flex-col items-center justify-center gap-8 px-4 py-10'>
@@ -67,26 +94,14 @@ export default function Onboarding() {
 			<div className='flex w-full flex-col items-center justify-center gap-4 md:flex-row md:items-stretch'>
 				<Card icon='plus' title='Criar workspace' description='Você será o dono: conecta o GitHub, escolhe os repositórios e convida o time.'>
 					{me.canCreateWorkspace ? (
-						<form onSubmit={handleCreate} className='flex flex-col gap-2'>
-							<TextField name='name' size='sm' placeholder='Nome do workspace' maxLength={60} required autoComplete='off' />
-							{createError && <p className='text-sm text-red-500'>{createError}</p>}
-							<Button type='submit' size='sm' loading={create.isPending}>
-								Criar e conectar ao GitHub
-							</Button>
-						</form>
+						<CreateWorkspaceForm />
 					) : (
 						<p className='text-muted-foreground text-sm'>Nesta instância, só logins autorizados criam workspaces. Peça um convite.</p>
 					)}
 				</Card>
 
 				<Card icon='users' title='Entrar com convite' description='Cole o link ou o código que o dono do workspace enviou.'>
-					<form onSubmit={handleJoin} className='flex flex-col gap-2'>
-						<TextField name='code' size='sm' placeholder='Link ou código do convite' required autoComplete='off' />
-						{joinError && <p className='text-sm text-red-500'>{joinError}</p>}
-						<Button type='submit' size='sm' loading={join.isPending}>
-							Entrar no workspace
-						</Button>
-					</form>
+					<JoinWorkspaceForm />
 				</Card>
 			</div>
 
