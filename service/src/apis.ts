@@ -98,15 +98,16 @@ export function searchOperations(spec: Spec, query = '') {
 
 // ---------- SSRF ----------
 
-/** Loopback, private, link-local, CGNAT, ULA and unspecified addresses (v4, v6 and v4-mapped v6). */
+/** Loopback, private, link-local, CGNAT, multicast/reserved, ULA and unspecified addresses, and v6 that carries a v4 inside. */
 export function isPrivateIp(ip: string) {
 	const v4 = ip.replace(/^::ffff:/i, '');
 	if (isIP(v4) === 4) {
 		const [a = 0, b = 0] = v4.split('.').map(Number);
-		return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127);
+		return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
 	}
-	const v6 = ip.toLowerCase();
-	return v6 === '::' || v6 === '::1' || /^f[cd]/.test(v6) || /^fe[89ab]/.test(v6);
+	// 0000::/16: ::, ::1 and the hex forms URL normalizes v4-mapped/compatible to ([::ffff:127.0.0.1] → ::ffff:7f00:1).
+	// fc/fd ULA, ff multicast, fe8-feb link-local, 64:ff9b NAT64 and 2002 6to4 (both embed any v4).
+	return /^0*:|^f[cdf]|^fe[89ab]|^64:ff9b:|^2002:/i.test(ip);
 }
 
 // ponytail: checks DNS before the fetch (rebinding window between lookup and connect); pin the resolved IP if it matters.

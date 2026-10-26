@@ -6,8 +6,8 @@ RUN go install \
 	github.com/sourcegraph/zoekt/cmd/zoekt-git-index@v0.0.0-20260911061844-153817f643cd
 
 FROM oven/bun:1.2.22
-# git: repo sync and the agent's tools (ls-tree / git grep -P / cat-file on the bare repo)
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates \
+# git: repo sync and the agent's tools (ls-tree / git grep -P / cat-file on the bare repo); util-linux: setpriv (entrypoint.sh)
+RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates util-linux \
 	&& rm -rf /var/lib/apt/lists/*
 COPY --from=zoekt /go/bin/zoekt /go/bin/zoekt-git-index /usr/local/bin/
 WORKDIR /app
@@ -16,4 +16,5 @@ RUN bun install --frozen-lockfile
 COPY . .
 RUN bunx --bun prisma generate
 EXPOSE 8000
-CMD ["sh", "-c", "bunx --bun prisma migrate deploy && bun src/index.ts"]
+# Runs as root just long enough to chown the repos volume, then as `bun` (see entrypoint.sh).
+CMD ["sh", "entrypoint.sh"]

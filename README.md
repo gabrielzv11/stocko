@@ -64,7 +64,7 @@ O login usa o OAuth do próprio App. O código lê os repos com tokens de instal
 - **Workspace**: projetos, conversas, configurações e instalações do GitHub ficam no workspace. Usuários e workspaces são N:N: uma pessoa pode estar em vários e troca de workspace pelo menu do perfil.
 - **Login**: qualquer conta do GitHub entra. Sem workspace, a pessoa vê duas opções: **Criar workspace** ou **Entrar com convite**. A mesma tela aparece em **Criar ou entrar em workspace**, no menu do perfil.
 - **Convites**: em Configurações, o dono gera um link (`<app>/invite/<código>`). Quem abrir o link, ou colar o link ou o código na tela inicial, entra como membro. O link vale por 7 dias, serve para várias pessoas e pode ser revogado a qualquer momento.
-- **`ALLOWED_GITHUB_LOGINS`** (opcional): se preenchida, só esses logins criam workspaces; os demais entram apenas por convite. Vazia, qualquer conta cria. Numa instância pública, preencha: cada workspace gasta da sua chave de LLM, até `MAX_DAILY_COST_USD` por dia.
+- **`ALLOWED_GITHUB_LOGINS`** (opcional): se preenchida, só esses logins criam workspaces; os demais entram apenas por convite. Vazia, qualquer conta cria. Numa instância pública, preencha: cada workspace gasta da sua chave de LLM, até `MAX_DAILY_COST_USD` por dia, e cada conta cria até `MAX_WORKSPACES_PER_USER` (padrão 3).
 - **Instalações**: **Conectar ao GitHub** (só o dono) vincula ao workspace ativo as instalações do App que a sua conta do GitHub enxerga e abre a página de instalação. A mesma instalação pode servir vários workspaces.
 
 Membros veem as respostas sobre todos os repos ligados ao workspace, mesmo os que não acessam diretamente no GitHub. Convide com isso em mente.

@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { assertPublicUrl, readCapped, seal, unseal } from './apis';
-import { requireAuth, type AuthVars } from './auth';
+import { forbidden, requireAuth, requireOwner, type AuthVars } from './auth';
 import { db } from './db';
 
 // Docs and Jira: "what it should be" next to the code ("what it is"). Retrieval is Postgres full-text ('portuguese'):
@@ -270,7 +270,8 @@ const jiraBody = z.object({
 	jql: z.string().trim().min(1).max(2000),
 });
 
-knowledge.post('/projects/:id/jira', requireAuth, async (c) => {
+// Owner only: the Jira token reads tickets on every member's questions.
+knowledge.post('/projects/:id/jira', requireAuth, requireOwner, async (c) => {
 	const body = jiraBody.safeParse(await c.req.json().catch(() => null));
 	if (!body.success) return c.json({ error: 'invalid_body', message: 'Informe URL do Jira, e-mail, API token e JQL.' }, 400);
 	const project = await ownProject(c.var.workspaceId, c.req.param('id'));
@@ -297,8 +298,12 @@ knowledge.post('/sources/:sid/sync', requireAuth, async (c) => {
 
 // Repos leave a project via PATCH /projects/:id; this removes docs and Jira sources (and their chunks).
 knowledge.delete('/projects/:id/sources/:sid', requireAuth, async (c) => {
-	const { count } = await db.projectSource.deleteMany({
+	const source = await db.projectSource.findFirst({
 		where: { id: c.req.param('sid'), projectId: c.req.param('id'), type: { in: ['doc', 'jira'] }, project: { workspaceId: c.var.workspaceId } },
+		select: { id: true, type: true },
 	});
-	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
+	if (!source) return c.json({ error: 'not_found' }, 404);
+	if (source.type === 'jira' && c.var.role !== 'owner') return forbidden(c);
+	await db.projectSource.delete({ where: { id: source.id } });
+	return c.body(null, 204);
 });

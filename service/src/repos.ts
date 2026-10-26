@@ -1,14 +1,14 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, rm } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { installationToken } from './client';
+import { installationOctokit, installationToken } from './client';
 import { db } from './db';
 import { env } from './env';
 
 /** Bare repo: tools read objects by SHA (ls-tree / grep / cat-file), no checkout on disk. */
 export const repoDir = (repositoryId: string) => path.resolve(env.REPOS_DIR, repositoryId);
-/** Zoekt shards, on the same volume. Shard names start with the repo id (= the bare dir's name). */
-export const zoektDir = path.resolve(env.REPOS_DIR, '.zoekt');
+/** Zoekt shards of one repo, inside its bare repo: a query can only reach that repo's code, and removing the repo removes them. */
+export const zoektDir = (repositoryId: string) => path.join(repoDir(repositoryId), 'zoekt');
 
 /** Spawns `cmd` and collects its output; `timeoutMs` kills it. */
 export async function run(cmd: string[], { cwd, env: extra, timeoutMs }: { cwd?: string; env?: Record<string, string>; timeoutMs?: number } = {}) {
@@ -59,12 +59,56 @@ export function syncRepo(repositoryId: string): Promise<void> {
 	return pending;
 }
 
-/** Deletes the repository (cascade: branches, project sources) and its clone and Zoekt shards. */
+/** Deletes the repository (cascade: branches, project sources) and its clone with its Zoekt shards. */
 export async function removeRepo(repositoryId: string) {
 	await db.repository.deleteMany({ where: { id: repositoryId } });
 	await rm(repoDir(repositoryId), { recursive: true, force: true });
-	const shards = await readdir(zoektDir).catch(() => []);
-	await Promise.all(shards.filter((f) => f.startsWith(`${repositoryId}_`)).map((f) => rm(path.join(zoektDir, f), { force: true })));
+}
+
+/** Old layout: one Zoekt index shared by every repo, so a crafted query could search other workspaces. Re-indexed per repo on the next sync. */
+// ponytail: remove once every deploy has booted past it.
+export const removeSharedZoekt = () => rm(path.resolve(env.REPOS_DIR, '.zoekt'), { recursive: true, force: true });
+
+const ACCESS_TTL_MS = 10 * 60_000;
+const accessCheckedAt = new Map<string, number>();
+export const REVOKED = 'Sem acesso no GitHub: repo removido da App, App desinstalada ou repo apagado.';
+
+/**
+ * Whether the App still reaches the repo on GitHub. Lost (404) → clone deleted and branches marked, so no tool reads
+ * code the workspace can't see anymore; the Repository row stays and a later sync re-clones if access comes back.
+ * Doesn't rely on the webhook. Any other failure (rate limit, outage) counts as access: only a 404 revokes.
+ * Checked at most every ACCESS_TTL_MS per repo, unless `fresh`.
+ */
+export async function checkAccess(repositoryId: string, { fresh = false } = {}) {
+	if (!fresh && (accessCheckedAt.get(repositoryId) ?? 0) > Date.now() - ACCESS_TTL_MS) return true;
+	const repo = await db.repository.findUnique({ where: { id: repositoryId }, include: { installation: true } });
+	if (!repo) return false;
+	const [owner = '', name = ''] = repo.fullName.split('/');
+	const status = await installationOctokit(Number(repo.installation.githubInstallationId))
+		.rest.repos.get({ owner, repo: name })
+		.then(
+			() => 200,
+			(e: { status?: number }) => e.status
+		);
+	if (status !== 404) {
+		accessCheckedAt.set(repositoryId, Date.now());
+		return true;
+	}
+	accessCheckedAt.delete(repositoryId);
+	await rm(repoDir(repositoryId), { recursive: true, force: true });
+	await db.repoBranch.updateMany({ where: { repositoryId }, data: { status: 'error', error: REVOKED, lastSyncedSha: null } });
+	return false;
+}
+
+/**
+ * Commits that left the observed branches (force-push removing a leaked secret, branch no longer observed) leave the
+ * disk now instead of in 2 weeks, so no tool reads them by sha. A tool mid-turn on the old sha gets "not found".
+ */
+export async function pruneUnobserved(dir: string, branchNames: string[]) {
+	const observed = new Set(branchNames.map((b) => `refs/heads/${b}`));
+	const refs = (await git(dir, ['for-each-ref', '--format=%(refname)', 'refs/heads'])).split('\n').filter(Boolean);
+	for (const ref of refs) if (!observed.has(ref)) await git(dir, ['update-ref', '-d', ref]);
+	await git(dir, ['gc', '--prune=now', '--quiet']);
 }
 
 /** Resolves when the running sync (if any) ends. Tools only need it before the first one. */
@@ -79,6 +123,8 @@ async function doSync(repositoryId: string) {
 	const branches = repo.branches.length
 		? repo.branches
 		: [await db.repoBranch.create({ data: { repositoryId, name: repo.defaultBranch, priority: 0 } })];
+	// Fresh: about to talk to GitHub anyway; access lost → clone deleted, nothing to fetch.
+	if (!(await checkAccess(repositoryId, { fresh: true }))) return;
 	// updateMany: a branch removed mid-sync just matches nothing.
 	const mark = (ids: string[], data: { status: 'syncing' | 'ready' | 'error'; error?: string | null; lastSyncedSha?: string }) =>
 		db.repoBranch.updateMany({ where: { id: { in: ids } }, data });
@@ -113,7 +159,6 @@ async function doSync(repositoryId: string) {
 	for (const b of branches) {
 		const ref = `refs/heads/${b.name}`;
 		try {
-			// Fetch only adds objects: an older SHA a tool is reading stays readable (until gc prunes it, 2 weeks).
 			await git(dir, ['fetch', '--depth=1', '--quiet', url, `+${ref}:${ref}`], token);
 			const sha = (await git(dir, ['rev-parse', ref])).trim();
 			await mark([b.id], { status: 'ready', lastSyncedSha: sha });
@@ -128,11 +173,15 @@ async function doSync(repositoryId: string) {
 	const top = ready[0];
 	if (!top) return;
 	await git(dir, ['symbolic-ref', 'HEAD', `refs/heads/${top}`]);
+	await pruneUnobserved(
+		dir,
+		branches.map((b) => b.name)
+	).catch((e) => console.error(`[sync] ${repo.fullName} gc:`, e));
 	if (env.GREP_BACKEND === 'zoekt') {
 		// Incremental: no-op when the branch didn't move. -disable_ctags: no ctags binary in the image.
 		// Spawn throws when the binary is missing (local Windows dev); same outcome as a failed index.
 		// ponytail: só a branch do topo é indexada; grep com ref de outra branch usa git grep.
-		const idx = await run(['zoekt-git-index', '-index', zoektDir, '-branches', top, '-submodules=false', '-disable_ctags', dir]).catch(
+		const idx = await run(['zoekt-git-index', '-index', zoektDir(repositoryId), '-branches', top, '-submodules=false', '-disable_ctags', dir]).catch(
 			(e: Error) => ({ code: -1, err: e.message })
 		);
 		// ponytail: falha no índice só loga; o grep cai no git grep enquanto não houver shard do repo.

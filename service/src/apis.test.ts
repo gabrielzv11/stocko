@@ -14,11 +14,35 @@ env.SECRETS_KEY ??= Buffer.alloc(32, 7).toString('base64');
 const { apiTools, assertPublicUrl, buildUrl, isPrivateIp, parseSpec, readCapped, seal, searchOperations, unseal } = await import('./apis');
 
 test('isPrivateIp / assertPublicUrl: block internal targets', async () => {
-	for (const ip of ['127.0.0.1', '10.1.2.3', '172.20.0.1', '192.168.0.1', '169.254.169.254', '100.64.0.1', '::1', 'fd12::1', 'fe80::1', '::ffff:127.0.0.1'])
+	for (const ip of [
+		'127.0.0.1',
+		'10.1.2.3',
+		'172.20.0.1',
+		'192.168.0.1',
+		'169.254.169.254',
+		'100.64.0.1',
+		'224.0.0.1',
+		'::',
+		'::1',
+		'0:0:0:0:0:0:0:1',
+		'fd12::1',
+		'fe80::1',
+		'ff02::1',
+		'::ffff:127.0.0.1',
+		'::ffff:7f00:1',
+		'::ffff:a9fe:a9fe',
+		'::7f00:1',
+		'64:ff9b::a9fe:a9fe',
+		'2002:7f00:1::1',
+	])
 		expect(isPrivateIp(ip)).toBe(true);
-	for (const ip of ['8.8.8.8', '172.32.0.1', '2606:4700::1111']) expect(isPrivateIp(ip)).toBe(false);
+	for (const ip of ['8.8.8.8', '172.32.0.1', '2606:4700::1111', '::ffff:8.8.8.8']) expect(isPrivateIp(ip)).toBe(false);
 	await expect(assertPublicUrl('http://169.254.169.254/latest')).rejects.toThrow('rede privada');
 	await expect(assertPublicUrl('http://[::1]:8000/')).rejects.toThrow('rede privada');
+	// URL normalizes these to the hex form (::ffff:7f00:1, ::7f00:1).
+	await expect(assertPublicUrl('http://[::ffff:127.0.0.1]/')).rejects.toThrow('rede privada');
+	await expect(assertPublicUrl('http://[::ffff:169.254.169.254]/latest')).rejects.toThrow('rede privada');
+	await expect(assertPublicUrl('http://[::127.0.0.1]/')).rejects.toThrow('rede privada');
 	await expect(assertPublicUrl('file:///etc/passwd')).rejects.toThrow('http(s)');
 });
 

@@ -89,6 +89,8 @@ test('zoekt query helpers', () => {
 	expect(re('src/**/*.{ts,tsx}').test('src/a.js')).toBe(false);
 	expect(re('a.b').test('axb')).toBe(false);
 
-	expect(zoektAtom('foo bar')).toBe('foo\\x20bar');
-	expect(zoektAtom('say "hi"\\ \\d')).toBe('say\\x20\\x22hi\\x22\\x20\\d');
+	expect(zoektAtom('foo bar')).toBe('foo\\x{20}bar');
+	expect(zoektAtom('say "hi"\\ \\d')).toBe('say\\x{20}\\x{22}hi\\x{22}\\x{20}\\d');
+	// Tab/newline also end an atom: unescaped, "x\tor\tregex:y" would become a second query.
+	expect(zoektAtom('x\tor\nregex:y\\\t')).toBe('x\\x{9}or\\x{a}regex:y\\x{9}');
 });

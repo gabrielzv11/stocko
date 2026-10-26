@@ -3,6 +3,7 @@ import Dialog from '@/components/ui/dialog';
 import { IconButton } from '@/components/ui/iconButton';
 import { TextField } from '@/components/ui/textField';
 import { api } from '@/lib/api';
+import { useMe } from '@/lib/me';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { useState } from 'react';
@@ -15,6 +16,8 @@ function ProjectApis({ project }: { project: Project }) {
 	const [adding, setAdding] = useState(false);
 	const queryClient = useQueryClient();
 	const { data: apis = [], isPending } = useProjectApis(project.id);
+	// Credencial (header de auth) é do dono: o agente a usa nas perguntas de todos.
+	const owner = useMe().data?.role === 'owner';
 	const invalidate = () => queryClient.invalidateQueries({ queryKey: ['projects', project.id, 'apis'] });
 
 	const create = useMutation({
@@ -68,7 +71,9 @@ function ProjectApis({ project }: { project: Project }) {
 								placeholder='Forma de uso: quando e como o agente deve consultar (ex.: lentidão → /api/v1/query com histogram_quantile)'
 							/>
 							<TextField name='baseUrl' type='url' placeholder='URL base para chamadas GET (vazio = só documentação)' />
-							<TextField name='authHeader' placeholder='Header de auth (ex.: Authorization: Bearer xxx), salvo criptografado' />
+							{owner && (
+								<TextField name='authHeader' placeholder='Header de auth (ex.: Authorization: Bearer xxx), salvo criptografado' />
+							)}
 							<label className='text-muted-foreground flex flex-col gap-1 text-sm'>
 								Spec OpenAPI/Swagger (.json, .yaml)
 								<input type='file' name='specFile' accept='.json,.yaml,.yml' />
@@ -105,15 +110,17 @@ function ProjectApis({ project }: { project: Project }) {
 							{a.baseUrl ? `${a.baseUrl}${a.hasAuth ? ' · com auth' : ''}` : 'Só documentação'}
 						</p>
 					</div>
-					<IconButton
-						icon='trash-2'
-						variant='ghost'
-						color='destructive'
-						size='sm'
-						aria-label='Remover API'
-						disabled={remove.isPending}
-						onClick={() => remove.mutate(a.id)}
-					/>
+					{(owner || !a.hasAuth) && (
+						<IconButton
+							icon='trash-2'
+							variant='ghost'
+							color='destructive'
+							size='sm'
+							aria-label='Remover API'
+							disabled={remove.isPending}
+							onClick={() => remove.mutate(a.id)}
+						/>
+					)}
 				</div>
 			))}
 		</section>

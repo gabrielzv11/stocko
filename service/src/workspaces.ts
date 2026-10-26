@@ -1,17 +1,12 @@
 import { Hono } from 'hono';
-import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
-import { canCreateWorkspace, requireAuth, requireUser, type AuthVars } from './auth';
+import { canCreateWorkspace, requireAuth, requireOwner, requireUser, type AuthVars } from './auth';
 import { db } from './db';
+import { env } from './env';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const workspaces = new Hono<{ Variables: AuthVars }>();
-
-const requireOwner = createMiddleware<{ Variables: AuthVars }>(async (c, next) => {
-	if (c.var.role !== 'owner') return c.json({ error: 'forbidden', message: 'Só o dono do workspace pode fazer isso.' }, 403);
-	await next();
-});
 
 const workspaceName = z.object({ name: z.string().trim().min(1).max(60) });
 
@@ -19,6 +14,11 @@ const workspaceName = z.object({ name: z.string().trim().min(1).max(60) });
 workspaces.post('/workspaces', requireUser, async (c) => {
 	const identity = await db.identity.findFirst({ where: { userId: c.var.userId, provider: 'github' } });
 	if (!canCreateWorkspace(identity?.login)) return c.json({ error: 'forbidden', message: 'Seu login não pode criar workspaces.' }, 403);
+	// The daily cost cap is per workspace: without this, N workspaces multiply it.
+	// ponytail: count then create; simultaneous requests can pass the limit by one.
+	const owned = await db.member.count({ where: { userId: c.var.userId, role: 'owner' } });
+	if (owned >= env.MAX_WORKSPACES_PER_USER)
+		return c.json({ error: 'forbidden', message: `Limite de ${env.MAX_WORKSPACES_PER_USER} workspaces por conta.` }, 403);
 	const body = workspaceName.safeParse(await c.req.json().catch(() => null));
 	if (!body.success) return c.json({ error: 'invalid_body', message: 'Nome inválido.' }, 400);
 	const workspace = await db.workspace.create({ data: { name: body.data.name, members: { create: { userId: c.var.userId } } } });

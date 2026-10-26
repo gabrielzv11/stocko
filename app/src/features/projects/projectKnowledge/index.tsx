@@ -6,6 +6,7 @@ import { IconButton } from '@/components/ui/iconButton';
 import { TextField } from '@/components/ui/textField';
 import { api } from '@/lib/api';
 import { day } from '@/lib/dayjs';
+import { useMe } from '@/lib/me';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { useState } from 'react';
@@ -34,6 +35,8 @@ function ProjectKnowledge({ project }: { project: Project }) {
 	const [adding, setAdding] = useState<'doc' | 'jira' | null>(null);
 	const queryClient = useQueryClient();
 	const { data: sources = [], isPending } = useKnowledge(project.id);
+	// Jira guarda o token do dono: só ele conecta e remove.
+	const owner = useMe().data?.role === 'owner';
 	const invalidate = () => queryClient.invalidateQueries({ queryKey: ['projects', project.id, 'knowledge'] });
 
 	const create = useMutation({
@@ -72,9 +75,11 @@ function ProjectKnowledge({ project }: { project: Project }) {
 					<Button variant='secondary' size='sm' onClick={() => setAdding('doc')}>
 						Adicionar doc
 					</Button>
-					<Button variant='secondary' size='sm' onClick={() => setAdding('jira')}>
-						Conectar Jira
-					</Button>
+					{owner && (
+						<Button variant='secondary' size='sm' onClick={() => setAdding('jira')}>
+							Conectar Jira
+						</Button>
+					)}
 				</div>
 			</div>
 			<p className='text-muted-foreground text-sm'>
@@ -156,15 +161,17 @@ function ProjectKnowledge({ project }: { project: Project }) {
 								onClick={() => sync.mutate(s.id)}
 							/>
 						)}
-						<IconButton
-							icon='trash-2'
-							variant='ghost'
-							color='destructive'
-							size='sm'
-							aria-label={`Remover ${s.title}`}
-							disabled={remove.isPending}
-							onClick={() => remove.mutate(s.id)}
-						/>
+						{(owner || s.type !== 'jira') && (
+							<IconButton
+								icon='trash-2'
+								variant='ghost'
+								color='destructive'
+								size='sm'
+								aria-label={`Remover ${s.title}`}
+								disabled={remove.isPending}
+								onClick={() => remove.mutate(s.id)}
+							/>
+						)}
 					</div>
 				</div>
 			))}
