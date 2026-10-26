@@ -8,13 +8,14 @@ import { db } from './db';
 import { env } from './env';
 import { knowledge } from './knowledge';
 import { projects } from './projects';
-import { resetStuckSyncs } from './repos';
+import { removeSharedZoekt, resetStuckSyncs } from './repos';
 import { settings } from './settings';
 import { usage } from './usage';
 import { webhooks } from './webhooks';
 import { workspaces } from './workspaces';
 
 await resetStuckSyncs();
+await removeSharedZoekt();
 
 const app = new Hono();
 

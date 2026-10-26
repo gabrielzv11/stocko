@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, rm } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { installationToken } from './client';
 import { db } from './db';
@@ -7,8 +7,8 @@ import { env } from './env';
 
 /** Bare repo: tools read objects by SHA (ls-tree / grep / cat-file), no checkout on disk. */
 export const repoDir = (repositoryId: string) => path.resolve(env.REPOS_DIR, repositoryId);
-/** Zoekt shards, on the same volume. Shard names start with the repo id (= the bare dir's name). */
-export const zoektDir = path.resolve(env.REPOS_DIR, '.zoekt');
+/** Zoekt shards of one repo, inside its bare repo: a query can only reach that repo's code, and removing the repo removes them. */
+export const zoektDir = (repositoryId: string) => path.join(repoDir(repositoryId), 'zoekt');
 
 /** Spawns `cmd` and collects its output; `timeoutMs` kills it. */
 export async function run(cmd: string[], { cwd, env: extra, timeoutMs }: { cwd?: string; env?: Record<string, string>; timeoutMs?: number } = {}) {
@@ -59,13 +59,15 @@ export function syncRepo(repositoryId: string): Promise<void> {
 	return pending;
 }
 
-/** Deletes the repository (cascade: branches, project sources) and its clone and Zoekt shards. */
+/** Deletes the repository (cascade: branches, project sources) and its clone with its Zoekt shards. */
 export async function removeRepo(repositoryId: string) {
 	await db.repository.deleteMany({ where: { id: repositoryId } });
 	await rm(repoDir(repositoryId), { recursive: true, force: true });
-	const shards = await readdir(zoektDir).catch(() => []);
-	await Promise.all(shards.filter((f) => f.startsWith(`${repositoryId}_`)).map((f) => rm(path.join(zoektDir, f), { force: true })));
 }
+
+/** Old layout: one Zoekt index shared by every repo, so a crafted query could search other workspaces. Re-indexed per repo on the next sync. */
+// ponytail: remove once every deploy has booted past it.
+export const removeSharedZoekt = () => rm(path.resolve(env.REPOS_DIR, '.zoekt'), { recursive: true, force: true });
 
 /** Resolves when the running sync (if any) ends. Tools only need it before the first one. */
 export const waitForSync = (repositoryId: string) => inflight.get(repositoryId) ?? Promise.resolve();
@@ -132,7 +134,7 @@ async function doSync(repositoryId: string) {
 		// Incremental: no-op when the branch didn't move. -disable_ctags: no ctags binary in the image.
 		// Spawn throws when the binary is missing (local Windows dev); same outcome as a failed index.
 		// ponytail: só a branch do topo é indexada; grep com ref de outra branch usa git grep.
-		const idx = await run(['zoekt-git-index', '-index', zoektDir, '-branches', top, '-submodules=false', '-disable_ctags', dir]).catch(
+		const idx = await run(['zoekt-git-index', '-index', zoektDir(repositoryId), '-branches', top, '-submodules=false', '-disable_ctags', dir]).catch(
 			(e: Error) => ({ code: -1, err: e.message })
 		);
 		// ponytail: falha no índice só loga; o grep cai no git grep enquanto não houver shard do repo.

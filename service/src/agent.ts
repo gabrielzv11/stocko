@@ -43,17 +43,19 @@ export function globToRegex(glob: string) {
 	return `^${re}$`;
 }
 
-/** Zoekt's query parser ends an atom at a space and opens a literal at `"`: hex escapes keep the regex intact. */
+/** Zoekt's query parser ends an atom at whitespace and opens a literal at `"`: hex escapes keep the regex intact. */
 export const zoektAtom = (re: string) =>
-	re.replace(/\\.|[ "]/g, (m) => (/^\\?[ "]$/.test(m) ? `\\x${m.at(-1)!.charCodeAt(0).toString(16)}` : m));
+	re.replace(/\\.|[\s"]/g, (m) => (/^\\?[\s"]$/.test(m) ? `\\x{${m.at(-1)!.charCodeAt(0).toString(16)}}` : m));
 
 /** `path:line:text` from the repo's Zoekt shards, or null when the repo has no shard yet (caller falls back to git). */
 async function zoektGrep(repoId: string, regex: string, glob?: string) {
-	const shards = await readdir(zoektDir).catch(() => []);
-	if (!shards.some((f) => f.startsWith(`${repoId}_`))) return null;
-	const q = ['case:yes', `r:^${repoId}$`, glob && `f:${zoektAtom(globToRegex(glob))}`, `regex:${zoektAtom(regex)}`].filter(Boolean).join(' ');
+	// Index dir holds only this repo: whatever the query says, it can't search another workspace's code.
+	const dir = zoektDir(repoId);
+	const shards = await readdir(dir).catch(() => []);
+	if (!shards.some((f) => f.endsWith('.zoekt'))) return null;
+	const q = ['case:yes', glob && `f:${zoektAtom(globToRegex(glob))}`, `regex:${zoektAtom(regex)}`].filter(Boolean).join(' ');
 	// -v: without it the CLI discards its own error messages (bad regex comes back as a bare exit 1).
-	const { out, err, code } = await run(['zoekt', '-v', '-index_dir', zoektDir, q], { timeoutMs: GREP_TIMEOUT_MS });
+	const { out, err, code } = await run(['zoekt', '-v', '-index_dir', dir, q], { timeoutMs: GREP_TIMEOUT_MS });
 	if (code !== 0) throw new Error(err.trim().split('\n').at(-1) || 'zoekt falhou');
 	return out;
 }
