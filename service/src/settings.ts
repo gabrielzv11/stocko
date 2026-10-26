@@ -3,7 +3,7 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { seal, unseal } from './apis';
-import { requireAuth, type AuthVars } from './auth';
+import { requireAuth, requireOwner, type AuthVars } from './auth';
 import { db } from './db';
 import { env } from './env';
 
@@ -55,7 +55,7 @@ const update = z.object({
 	mangabaApiKey: z.string().trim().max(500).optional(),
 });
 
-settings.put('/settings', requireAuth, async (c) => {
+settings.put('/settings', requireAuth, requireOwner, async (c) => {
 	const body = update.safeParse(await c.req.json().catch(() => null));
 	if (!body.success) return c.json({ error: 'invalid_body', issues: body.error.issues }, 400);
 	const { provider, model, mangabaApiKey } = body.data;

@@ -26,6 +26,7 @@ test('settings: Mangaba needs a key the router accepts; the key is never returne
 	const put = (body: object) => settings.request('/settings', { method: 'PUT', headers, body: JSON.stringify(body) });
 
 	// GET /models do Mangaba: só mr-good é aceita.
+	let member: { id: string } | undefined;
 	const realFetch = globalThis.fetch;
 	globalThis.fetch = (async (_url: string, init?: RequestInit) =>
 		new Response(null, { status: (init?.headers as Record<string, string>).authorization === 'Bearer mr-good' ? 200 : 401 })) as typeof fetch;
@@ -45,9 +46,25 @@ test('settings: Mangaba needs a key the router accepts; the key is never returne
 
 		expect((await put({ provider: 'openrouter', model: '' })).status).toBe(204);
 		expect(await workspaceLlm(workspaceId)).toMatchObject({ provider: 'openrouter', model: env.LLM_MODEL });
+
+		// Só o dono troca o LLM do workspace.
+		const memberToken = crypto.randomUUID();
+		member = await db.user.create({
+			data: {
+				name: 'member',
+				memberships: { create: { workspaceId, role: 'member' } },
+				sessions: { create: { tokenHash: sha256(memberToken), expiresAt: new Date(Date.now() + 60_000) } },
+			},
+		});
+		const asMember = await settings.request('/settings', {
+			method: 'PUT',
+			headers: { ...headers, Authorization: `Bearer ${memberToken}` },
+			body: JSON.stringify({ provider: 'mangaba', model: 'x' }),
+		});
+		expect(asMember.status).toBe(403);
 	} finally {
 		globalThis.fetch = realFetch;
 		await db.workspace.delete({ where: { id: workspaceId } });
-		await db.user.delete({ where: { id: user.id } });
+		await db.user.deleteMany({ where: { id: { in: [user.id, member?.id ?? ''] } } });
 	}
 });

@@ -88,6 +88,14 @@ export const requireAuth = createMiddleware<{ Variables: AuthVars }>(async (c, n
 	await next();
 });
 
+export const forbidden = (c: Context) => c.json({ error: 'forbidden', message: 'Só o dono do workspace pode fazer isso.' }, 403);
+
+/** After requireAuth. Owner only: workspace config, credentials (API auth, Jira) and deletions. */
+export const requireOwner = createMiddleware<{ Variables: AuthVars }>(async (c, next) => {
+	if (c.var.role !== 'owner') return forbidden(c);
+	await next();
+});
+
 export const auth = new Hono<{ Variables: AuthVars }>();
 
 // Explicit callback on this host, else GitHub uses the App's first Callback URL (localhost in prod).

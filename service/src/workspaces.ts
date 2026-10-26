@@ -1,17 +1,11 @@
 import { Hono } from 'hono';
-import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
-import { canCreateWorkspace, requireAuth, requireUser, type AuthVars } from './auth';
+import { canCreateWorkspace, requireAuth, requireOwner, requireUser, type AuthVars } from './auth';
 import { db } from './db';
 
 const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const workspaces = new Hono<{ Variables: AuthVars }>();
-
-const requireOwner = createMiddleware<{ Variables: AuthVars }>(async (c, next) => {
-	if (c.var.role !== 'owner') return c.json({ error: 'forbidden', message: 'Só o dono do workspace pode fazer isso.' }, 403);
-	await next();
-});
 
 const workspaceName = z.object({ name: z.string().trim().min(1).max(60) });
 

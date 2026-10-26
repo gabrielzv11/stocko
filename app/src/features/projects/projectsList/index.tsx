@@ -3,6 +3,7 @@ import { IconButton } from '@/components/ui/iconButton';
 import { List } from '@/components/ui/list';
 import { TextField } from '@/components/ui/textField';
 import { api } from '@/lib/api';
+import { useMe } from '@/lib/me';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -17,6 +18,7 @@ function ProjectsList({ ...props }: Props) {
 	const navigate = useNavigate();
 	const queryClient = useQueryClient();
 	const { data: projects = [], isPending } = useProjects();
+	const owner = useMe().data?.role === 'owner';
 	const invalidate = () => queryClient.invalidateQueries({ queryKey: ['projects'] });
 
 	const term = search.trim().toLowerCase();
@@ -83,18 +85,20 @@ function ProjectsList({ ...props }: Props) {
 								{project.repos.map((r) => r.fullName).join(', ')}
 							</p>
 						</div>
-						<IconButton
-							icon='trash-2'
-							variant='ghost'
-							color='destructive'
-							size='sm'
-							aria-label='Excluir projeto'
-							disabled={remove.isPending}
-							onClick={(e) => {
-								e.stopPropagation();
-								remove.mutate(project.id);
-							}}
-						/>
+						{owner && (
+							<IconButton
+								icon='trash-2'
+								variant='ghost'
+								color='destructive'
+								size='sm'
+								aria-label='Excluir projeto'
+								disabled={remove.isPending}
+								onClick={(e) => {
+									e.stopPropagation();
+									remove.mutate(project.id);
+								}}
+							/>
+						)}
 					</>
 				)}
 			/>

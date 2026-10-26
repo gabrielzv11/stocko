@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { assertPublicUrl, parseSpec, seal } from './apis';
-import { requireAuth, type AuthVars } from './auth';
+import { forbidden, requireAuth, requireOwner, type AuthVars } from './auth';
 import { installationOctokit } from './client';
 import { db } from './db';
 import type { Prisma } from './generated/prisma/client';
@@ -237,6 +237,8 @@ projects.post('/projects/:id/apis', requireAuth, async (c) => {
 	if (!project) return c.json({ error: 'not_found' }, 404);
 
 	const { spec, authHeader, baseUrl, ...meta } = body.data;
+	// A credential is the owner's call: call_api uses it on every member's questions.
+	if (authHeader && c.var.role !== 'owner') return forbidden(c);
 	try {
 		const data = {
 			...meta,
@@ -253,13 +255,17 @@ projects.post('/projects/:id/apis', requireAuth, async (c) => {
 });
 
 projects.delete('/projects/:id/apis/:aid', requireAuth, async (c) => {
-	const { count } = await db.apiSpec.deleteMany({
+	const api = await db.apiSpec.findFirst({
 		where: { id: c.req.param('aid'), projectId: c.req.param('id'), project: { workspaceId: c.var.workspaceId } },
+		select: { id: true, authHeader: true },
 	});
-	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
+	if (!api) return c.json({ error: 'not_found' }, 404);
+	if (api.authHeader && c.var.role !== 'owner') return forbidden(c);
+	await db.apiSpec.delete({ where: { id: api.id } });
+	return c.body(null, 204);
 });
 
-projects.delete('/projects/:id', requireAuth, async (c) => {
+projects.delete('/projects/:id', requireAuth, requireOwner, async (c) => {
 	const { count } = await db.project.deleteMany({ where: { id: c.req.param('id'), workspaceId: c.var.workspaceId } });
 	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
 });
