@@ -155,3 +155,37 @@ test('patch: renames and pins only conversations of the own workspace, without m
 		await db.user.delete({ where: { id: user.id } });
 	}
 });
+
+test('delete: empties and hides only own conversations, keeps the cost rows, kills the share link', async () => {
+	const user = await db.user.create({
+		data: { name: 'test', memberships: { create: { workspace: { create: { name: 'test' } } } } },
+		include: { memberships: true },
+	});
+	const workspaceId = user.memberships[0]!.workspaceId;
+	const other = await db.workspace.create({ data: { name: 'other' } });
+	const token = crypto.randomUUID();
+	await db.session.create({ data: { tokenHash: sha256(token), userId: user.id, expiresAt: new Date(Date.now() + 60_000) } });
+	const call = (path: string, method = 'GET') => chat.request(path, { method, headers: { Authorization: `Bearer ${token}` } });
+
+	try {
+		const share = crypto.randomUUID();
+		const conversation = await db.conversation.create({
+			data: { workspaceId, title: 'Segredo', shareToken: share, messages: { create: { role: 'assistant', parts: [{ type: 'text', text: 'x' }], cost: 1 } } },
+		});
+		const foreign = await db.conversation.create({ data: { workspaceId: other.id } });
+
+		expect((await call(`/conversations/${foreign.id}`, 'DELETE')).status).toBe(404);
+		expect((await call(`/conversations/${conversation.id}`, 'DELETE')).status).toBe(204);
+		expect((await call(`/conversations/${conversation.id}`, 'DELETE')).status).toBe(404);
+
+		expect(await (await call('/conversations')).json()).toEqual([]);
+		expect((await call(`/conversations/${conversation.id}`)).status).toBe(404);
+		expect((await chat.request(`/shared/${share}`)).status).toBe(404);
+		const saved = await db.conversation.findUniqueOrThrow({ where: { id: conversation.id }, include: { messages: true } });
+		expect(saved).toMatchObject({ title: null, shareToken: null });
+		expect(saved.messages.map((m) => [m.parts, Number(m.cost)])).toEqual([[[], 1]]);
+	} finally {
+		await db.workspace.deleteMany({ where: { id: { in: [workspaceId, other.id] } } });
+		await db.user.delete({ where: { id: user.id } });
+	}
+});

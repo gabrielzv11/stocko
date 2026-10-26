@@ -85,7 +85,7 @@ const linkedProjects = { select: { id: true, name: true }, orderBy: { name: 'asc
 // ponytail: últimas 100, sem paginação; cursor por updatedAt quando a lista crescer.
 chat.get('/conversations', requireAuth, async (c) => {
 	const list = await db.conversation.findMany({
-		where: { workspaceId: c.var.workspaceId },
+		where: { workspaceId: c.var.workspaceId, deletedAt: null },
 		orderBy: [{ pinned: 'desc' }, { updatedAt: 'desc' }],
 		take: 100,
 		select: { id: true, title: true, pinned: true, updatedAt: true, projects: linkedProjects },
@@ -95,7 +95,7 @@ chat.get('/conversations', requireAuth, async (c) => {
 
 chat.get('/conversations/:id', requireAuth, async (c) => {
 	const conversation = await db.conversation.findFirst({
-		where: { id: c.req.param('id'), workspaceId: c.var.workspaceId },
+		where: { id: c.req.param('id'), workspaceId: c.var.workspaceId, deletedAt: null },
 		select: {
 			id: true,
 			title: true,
@@ -114,16 +114,28 @@ const patchBody = z.object({ title: z.string().trim().min(1).max(MAX_TITLE).opti
 chat.patch('/conversations/:id', requireAuth, async (c) => {
 	const body = patchBody.safeParse(await c.req.json().catch(() => null));
 	if (!body.success) return c.json({ error: 'invalid_body' }, 400);
-	const conversation = await db.conversation.findFirst({ where: { id: c.req.param('id'), workspaceId: c.var.workspaceId }, select: { id: true, updatedAt: true } });
+	const conversation = await db.conversation.findFirst({ where: { id: c.req.param('id'), workspaceId: c.var.workspaceId, deletedAt: null }, select: { id: true, updatedAt: true } });
 	if (!conversation) return c.json({ error: 'not_found' }, 404);
 	// Same updatedAt: renaming or pinning doesn't move the conversation in the list.
 	await db.conversation.update({ where: { id: conversation.id }, data: { ...body.data, updatedAt: conversation.updatedAt } });
 	return c.body(null, 204);
 });
 
+// Soft delete: a hard one would cascade the messages and take their cost out of the 24h cap and /usage.
+// Content goes away (title, summary, parts, share link); the usage columns stay.
+chat.delete('/conversations/:id', requireAuth, async (c) => {
+	const where = { id: c.req.param('id'), workspaceId: c.var.workspaceId, deletedAt: null };
+	// Messages first: once deletedAt is set, `where` no longer matches.
+	const [, { count }] = await db.$transaction([
+		db.message.updateMany({ where: { conversation: where }, data: { parts: [] } }),
+		db.conversation.updateMany({ where, data: { deletedAt: new Date(), title: null, summary: null, shareToken: null, pinned: false } }),
+	]);
+	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
+});
+
 // ---------- share: public read-only link ----------
 
-const ownConversation = (workspaceId: string, id: string) => db.conversation.findFirst({ where: { id, workspaceId }, select: { id: true, shareToken: true } });
+const ownConversation = (workspaceId: string, id: string) => db.conversation.findFirst({ where: { id, workspaceId, deletedAt: null }, select: { id: true, shareToken: true } });
 
 chat.get('/conversations/:id/share', requireAuth, async (c) => {
 	const conversation = await ownConversation(c.var.workspaceId, c.req.param('id'));
@@ -163,7 +175,7 @@ chat.put('/messages/:id/feedback', requireAuth, async (c) => {
 	const body = z.object({ value: z.union([z.literal(1), z.literal(-1), z.null()]) }).safeParse(await c.req.json().catch(() => null));
 	if (!body.success) return c.json({ error: 'invalid_body' }, 400);
 	const { count } = await db.message.updateMany({
-		where: { id: c.req.param('id'), role: 'assistant', conversation: { workspaceId: c.var.workspaceId } },
+		where: { id: c.req.param('id'), role: 'assistant', conversation: { workspaceId: c.var.workspaceId, deletedAt: null } },
 		data: { feedback: body.data.value },
 	});
 	return count ? c.body(null, 204) : c.json({ error: 'not_found' }, 404);
@@ -180,8 +192,9 @@ chat.post('/conversations/:id/messages', requireAuth, async (c) => {
 	const { message, projectIds } = parsed.data;
 
 	// Anti-IDOR: id de conversa de outro workspace parece inexistente.
-	const owner = await db.conversation.findUnique({ where: { id }, select: { workspaceId: true } });
-	if (owner && owner.workspaceId !== workspaceId) return c.json({ error: 'not_found' }, 404);
+	// Apagada: o id não volta a valer.
+	const owner = await db.conversation.findUnique({ where: { id }, select: { workspaceId: true, deletedAt: true } });
+	if (owner && (owner.workspaceId !== workspaceId || owner.deletedAt)) return c.json({ error: 'not_found' }, 404);
 
 	const limited = await limitError(workspaceId);
 	if (limited) return c.json({ error: 'rate_limited', message: limited }, 429);
