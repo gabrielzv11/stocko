@@ -84,7 +84,7 @@ function ProjectDialog({ open, onClose, title, submitLabel, project, onSubmit, p
 								</div>
 							))}
 						</div>
-						{me?.role === 'owner' && (
+						{me?.role === 'owner' && me.workspaceId && (
 							<a href={githubInstallUrl(me.workspaceId)} className='text-muted-foreground text-xs underline'>
 								Liberar outros repositórios no GitHub
 							</a>

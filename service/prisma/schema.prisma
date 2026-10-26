@@ -90,17 +90,16 @@ model Member {
   @@index([userId])
 }
 
-/// Pending invite by GitHub login; accepted (and deleted) on that user's next sign-in. Also lets them past ALLOWED_GITHUB_LOGINS.
+/// Invite code/link (app/invite/<code>): anyone signed in who has it joins as member until it expires or the owner revokes it.
 model Invite {
   id          String    @id @default(cuid())
   workspaceId String
-  /// Lowercase GitHub login.
-  login       String
+  code        String    @unique
+  expiresAt   DateTime
   createdAt   DateTime  @default(now())
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
-  @@unique([workspaceId, login])
-  @@index([login])
+  @@index([workspaceId])
 }
 
 // ---------- github ----------

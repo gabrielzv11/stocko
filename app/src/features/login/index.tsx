@@ -1,11 +1,9 @@
 import { Button } from '@/components/ui/button';
-import { loginUrl, setToken } from '@/lib/auth';
+import { loginUrl, setToken, takePendingInvite } from '@/lib/auth';
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const errors: Record<string, string> = {
-	forbidden: 'Seu usuário do GitHub não tem acesso ao Stocko.',
-};
+const errors: Record<string, string> = {};
 
 // Também é o destino do callback do GitHub: o service redireciona para /login#token=... ou #error=...
 export default function Login() {
@@ -17,7 +15,9 @@ export default function Login() {
 	useEffect(() => {
 		if (!token) return;
 		setToken(token);
-		navigate('/', { replace: true });
+		// Veio de um link de convite → aceita agora.
+		const invite = takePendingInvite();
+		navigate(invite ? `/invite/${invite}` : '/', { replace: true });
 	}, [token, navigate]);
 
 	if (token) return null;

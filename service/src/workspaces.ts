@@ -1,8 +1,10 @@
 import { Hono } from 'hono';
 import { createMiddleware } from 'hono/factory';
 import { z } from 'zod';
-import { canCreateWorkspace, requireAuth, type AuthVars } from './auth';
+import { canCreateWorkspace, requireAuth, requireUser, type AuthVars } from './auth';
 import { db } from './db';
+
+const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 
 export const workspaces = new Hono<{ Variables: AuthVars }>();
 
@@ -13,8 +15,8 @@ const requireOwner = createMiddleware<{ Variables: AuthVars }>(async (c, next) =
 
 const workspaceName = z.object({ name: z.string().trim().min(1).max(60) });
 
-/** New workspace owned by the user (ALLOWED_GITHUB_LOGINS only); becomes the session's active one. */
-workspaces.post('/workspaces', requireAuth, async (c) => {
+/** New workspace owned by the user (only ALLOWED_GITHUB_LOGINS when set); becomes the session's active one. */
+workspaces.post('/workspaces', requireUser, async (c) => {
 	const identity = await db.identity.findFirst({ where: { userId: c.var.userId, provider: 'github' } });
 	if (!canCreateWorkspace(identity?.login)) return c.json({ error: 'forbidden', message: 'Seu login não pode criar workspaces.' }, 403);
 	const body = workspaceName.safeParse(await c.req.json().catch(() => null));
@@ -45,7 +47,10 @@ workspaces.get('/members', requireAuth, async (c) => {
 			where: { workspaceId: c.var.workspaceId },
 			include: { user: { include: { identities: { where: { provider: 'github' }, take: 1 } } } },
 		}),
-		db.invite.findMany({ where: { workspaceId: c.var.workspaceId }, orderBy: { createdAt: 'asc' } }),
+		// Codes only for the owner: a member could hand them out.
+		c.var.role === 'owner'
+			? db.invite.findMany({ where: { workspaceId: c.var.workspaceId, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'asc' } })
+			: [],
 	]);
 	return c.json({
 		members: members.map((m) => ({
@@ -55,31 +60,25 @@ workspaces.get('/members', requireAuth, async (c) => {
 			login: m.user.identities[0]?.login ?? null,
 			role: m.role,
 		})),
-		invites: invites.map(({ id, login, createdAt }) => ({ id, login, createdAt })),
+		invites: invites.map(({ id, code, expiresAt }) => ({ id, code, expiresAt })),
 	});
 });
 
-// GitHub login rules: alphanumerics and single hyphens, up to 39 chars.
-const invite = z.object({
-	login: z
-		.string()
-		.trim()
-		.regex(/^[a-z\d](?:[a-z\d]|-(?=[a-z\d])){0,38}$/i)
-		.transform((s) => s.toLowerCase()),
-});
-
+/** New invite code (link: app/invite/<code>), reusable for 7 days or until revoked. 72 random bits: short enough to type. */
 workspaces.post('/invites', requireAuth, requireOwner, async (c) => {
-	const body = invite.safeParse(await c.req.json().catch(() => null));
-	if (!body.success) return c.json({ error: 'invalid_body', message: 'Login do GitHub inválido.' }, 400);
-	const { workspaceId } = c.var;
-	const { login } = body.data;
-	const already = await db.member.count({
-		where: { workspaceId, user: { identities: { some: { provider: 'github', login: { equals: login, mode: 'insensitive' } } } } },
-	});
-	if (already) return c.json({ error: 'invalid_invite', message: 'Já é membro do workspace.' }, 400);
-	const created = await db.invite.createMany({ data: { workspaceId, login }, skipDuplicates: true });
-	if (!created.count) return c.json({ error: 'invalid_invite', message: 'Convite já enviado.' }, 400);
-	return c.body(null, 201);
+	const code = Buffer.from(crypto.getRandomValues(new Uint8Array(9))).toString('base64url');
+	await db.invite.deleteMany({ where: { workspaceId: c.var.workspaceId, expiresAt: { lt: new Date() } } });
+	const invite = await db.invite.create({ data: { workspaceId: c.var.workspaceId, code, expiresAt: new Date(Date.now() + INVITE_TTL_MS) } });
+	return c.json({ id: invite.id, code, expiresAt: invite.expiresAt }, 201);
+});
+
+/** Joins the invite's workspace as member (no-op if already in it) and makes it the session's active one. */
+workspaces.post('/invites/:code/accept', requireUser, async (c) => {
+	const invite = await db.invite.findUnique({ where: { code: c.req.param('code') } });
+	if (!invite || invite.expiresAt < new Date()) return c.json({ error: 'not_found', message: 'Convite inválido ou expirado.' }, 404);
+	await db.member.createMany({ data: { workspaceId: invite.workspaceId, userId: c.var.userId, role: 'member' }, skipDuplicates: true });
+	await db.session.update({ where: { tokenHash: c.var.tokenHash }, data: { workspaceId: invite.workspaceId } });
+	return c.json({ workspaceId: invite.workspaceId });
 });
 
 workspaces.delete('/invites/:id', requireAuth, requireOwner, async (c) => {

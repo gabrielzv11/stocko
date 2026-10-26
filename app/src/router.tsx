@@ -5,15 +5,28 @@ import { Layout } from './components/layout';
 import Home from './features/home';
 import { unsentIds } from './features/home/api';
 import Login from './features/login';
+import Onboarding, { InvitePage } from './features/onboarding';
 import Projects from './features/projects';
 import ProjectPage from './features/projects/projectPage';
 import Settings from './features/settings';
 import SharedConversation from './features/shared';
 import Usage from './features/usage';
 import { getToken } from './lib/auth';
+import { useMe } from './lib/me';
+
+// Sem workspace ainda → onboarding (criar um ou entrar por convite).
+function WorkspaceGate() {
+	const { data: me } = useMe();
+	if (!me) return null;
+	return me.workspaceId ? <Layout /> : <Navigate to='/welcome' replace />;
+}
 
 function RequireAuth() {
-	return getToken() ? <Layout /> : <Navigate to='/login' replace />;
+	return getToken() ? <WorkspaceGate /> : <Navigate to='/login' replace />;
+}
+
+function RequireToken() {
+	return getToken() ? <Onboarding /> : <Navigate to='/login' replace />;
 }
 
 // Cada "Nova conversa" ganha um id já na URL; a conversa só é salva no primeiro envio.
@@ -37,6 +50,8 @@ function Router() {
 			<Route path='login' element={<Login />} />
 			{/* Link público: fora do RequireAuth. */}
 			<Route path='s/:token' element={<SharedConversation />} />
+			<Route path='invite/:code' element={<InvitePage />} />
+			<Route path='welcome' element={<RequireToken />} />
 			<Route element={<RequireAuth />}>
 				<Route index element={<NewConversation />} />
 				<Route path='c/:id' element={<ConversationPage />} />

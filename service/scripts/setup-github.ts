@@ -28,7 +28,9 @@ if (import.meta.main) {
 		callback_urls: [`${api}/auth/github/callback`],
 		setup_url: `${api}/auth/github/login`,
 		setup_on_update: true,
-		public: false,
+		// Public: GitHub answers 404 when another account tries to sign in with a private App.
+		// Access is still per workspace (invites); installations only link to workspaces whose owner can see them.
+		public: true,
 		default_permissions: { contents: 'read', metadata: 'read' },
 		...(publicApi && { hook_attributes: { url: `${api}/webhooks/github` }, default_events: ['push'] }),
 	};

@@ -8,17 +8,10 @@ import {
 	DropdownMenuTrigger,
 } from '@/components/ui/dropdownMenu';
 import { Icon } from '@/components/ui/icons';
-import { api } from '@/lib/api';
-import { clearToken, githubInstallUrl } from '@/lib/auth';
+import { githubInstallUrl } from '@/lib/auth';
 import { cn } from '@/lib/cn';
-import { createWorkspace, switchWorkspace, useMe } from '@/lib/me';
+import { logout, switchWorkspace, useMe } from '@/lib/me';
 import { useNavigate } from 'react-router-dom';
-
-async function logout() {
-	await api.post('/auth/logout').catch(() => {});
-	clearToken();
-	window.location.assign('/login');
-}
 
 interface Props {
 	collapsed?: boolean;
@@ -43,7 +36,7 @@ function Profile({ collapsed }: Props) {
 						aria-label='Perfil'
 						className={cn(
 							'hover:bg-card data-[state=open]:bg-card flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-sm whitespace-nowrap transition-colors outline-none',
-							collapsed && 'justify-center px-0'
+							collapsed && 'justify-center px-0',
 						)}
 					>
 						{me?.avatarUrl ? (
@@ -63,7 +56,7 @@ function Profile({ collapsed }: Props) {
 				</DropdownMenuTrigger>
 
 				<DropdownMenuContent className='w-max' side='top'>
-					{me && (me.workspaces.length > 1 || me.canCreateWorkspace) && (
+					{me && (
 						<>
 							<DropdownMenuLabel className='text-muted-foreground text-xs'>Workspace</DropdownMenuLabel>
 							<DropdownMenuGroup>
@@ -73,12 +66,10 @@ function Profile({ collapsed }: Props) {
 										{w.name}
 									</DropdownMenuItem>
 								))}
-								{me.canCreateWorkspace && (
-									<DropdownMenuItem onSelect={createWorkspace}>
-										<Icon icon='plus' size='sm' />
-										Novo workspace
-									</DropdownMenuItem>
-								)}
+								<DropdownMenuItem onSelect={() => navigate('/welcome')}>
+									<Icon icon='plus' size='sm' />
+									Criar ou entrar em workspace
+								</DropdownMenuItem>
 							</DropdownMenuGroup>
 							<DropdownMenuSeparator />
 						</>
@@ -86,8 +77,8 @@ function Profile({ collapsed }: Props) {
 					<DropdownMenuGroup>
 						<DropdownMenuItem onSelect={() => navigate('/settings')}>Configurações</DropdownMenuItem>
 						<DropdownMenuItem onSelect={() => navigate('/usage')}>Uso</DropdownMenuItem>
-						{me?.role === 'owner' && (
-							<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl(me.workspaceId))}>
+						{me?.role === 'owner' && me.workspaceId && (
+							<DropdownMenuItem onSelect={() => window.location.assign(githubInstallUrl(me.workspaceId!))}>
 								{me.hasInstallation ? 'Gerenciar acesso ao GitHub' : 'Conectar ao GitHub'}
 							</DropdownMenuItem>
 						)}

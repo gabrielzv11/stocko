@@ -40,7 +40,7 @@ const schema = z.object({
 		.string()
 		.refine((s) => Buffer.from(s, 'base64').length === 32, 'expected 32 bytes in base64')
 		.optional(),
-	// Comma-separated GitHub logins that may sign in and create workspaces. Invited logins get in without being listed.
+	// Comma-separated GitHub logins that may create workspaces; empty = anyone. Everyone can sign in and join by invite.
 	ALLOWED_GITHUB_LOGINS: z
 		.string()
 		.default('')

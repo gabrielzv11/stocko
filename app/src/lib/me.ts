@@ -1,4 +1,5 @@
 import { api } from '@/lib/api';
+import { clearToken } from '@/lib/auth';
 import { useQuery } from '@tanstack/react-query';
 
 export type Role = 'owner' | 'member';
@@ -8,12 +9,12 @@ export type Me = {
 	name: string | null;
 	avatarUrl: string | null;
 	login: string | null;
-	/** Workspace ativo da sessão. */
-	workspaceId: string;
-	role: Role;
+	/** Workspace ativo da sessão; null = ainda sem workspace (onboarding). */
+	workspaceId: string | null;
+	role: Role | null;
 	workspaces: { id: string; name: string; role: Role }[];
 	hasInstallation: boolean;
-	/** Login em ALLOWED_GITHUB_LOGINS: pode criar workspaces. */
+	/** ALLOWED_GITHUB_LOGINS vazia ou com o login: pode criar workspaces. */
 	canCreateWorkspace: boolean;
 };
 
@@ -25,8 +26,8 @@ export async function switchWorkspace(id: string) {
 	window.location.assign('/');
 }
 
-/** Cria um workspace (já vira o ativo) e abre as configurações para renomear e conectar o GitHub. */
-export async function createWorkspace() {
-	await api.post('/workspaces', { name: 'Novo workspace' });
-	window.location.assign('/settings');
+export async function logout() {
+	await api.post('/auth/logout').catch(() => {});
+	clearToken();
+	window.location.assign('/login');
 }

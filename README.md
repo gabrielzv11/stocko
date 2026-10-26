@@ -22,7 +22,6 @@ O `setup:github` abre o GitHub com o App já configurado: você só confirma o n
 
 No `.env`, preencha também:
 
-- `ALLOWED_GITHUB_LOGINS`: seu login do GitHub (veja [Acesso e workspaces](#acesso-e-workspaces)).
 - `OPENROUTER_API_KEY`.
 - `SECRETS_KEY`: gere com `openssl rand -base64 32`.
 
@@ -32,7 +31,7 @@ Depois:
 docker compose up -d --build
 ```
 
-Abra http://localhost:5003, entre com o GitHub e, no menu do perfil, clique em **Conectar ao GitHub** para instalar o App nas contas e repos que o agente pode ler.
+Abra http://localhost:5003 e entre com o GitHub. Na primeira vez, escolha **Criar workspace**: em seguida o GitHub abre para você instalar o App nas contas e repos que o agente pode ler.
 
 ### Domínio próprio
 
@@ -48,12 +47,13 @@ Sirva API e front atrás de um proxy com HTTPS (Caddy, Traefik, nginx). Os volum
 
 ## GitHub App
 
-Cada instância usa o próprio App, privado. O `setup:github` cria um com:
+Cada instância usa o próprio App. O `setup:github` cria um com:
 
 - Permissões: **Contents** e **Metadata** (somente leitura).
 - Callback URL: `<api>/auth/github/callback`.
 - Setup URL: `<api>/auth/github/login`, com "Redirect on update".
 - Webhook: `<api>/webhooks/github`, evento **Push** (só com API pública).
+- Visibilidade: **pública**. Com App privado, o GitHub responde 404 quando outra conta tenta entrar. Ser público só permite que qualquer conta autorize o login e instale o App na própria conta; o acesso aos dados continua por workspace.
 
 Para criar o App à mão: GitHub → Settings → Developer settings → GitHub Apps, com os valores acima. Os campos que vão para o `.env` estão descritos em [`service/.env.example`](service/.env.example).
 
@@ -62,8 +62,9 @@ O login usa o OAuth do próprio App. O código lê os repos com tokens de instal
 ## Acesso e workspaces
 
 - **Workspace**: projetos, conversas, configurações e instalações do GitHub ficam no workspace. Usuários e workspaces são N:N: uma pessoa pode estar em vários e troca de workspace pelo menu do perfil.
-- **`ALLOWED_GITHUB_LOGINS`**: quem pode entrar sem convite e criar workspaces. No primeiro login, cada pessoa da lista ganha um workspace e pode criar outros em **Novo workspace**. Vazia, a instância só aceita quem já foi convidado.
-- **Convites**: o dono convida pelo login do GitHub em Configurações, e a pessoa entra no próximo login, sem precisar estar na lista.
+- **Login**: qualquer conta do GitHub entra. Sem workspace, a pessoa vê duas opções: **Criar workspace** ou **Entrar com convite**. A mesma tela aparece em **Criar ou entrar em workspace**, no menu do perfil.
+- **Convites**: em Configurações, o dono gera um link (`<app>/invite/<código>`). Quem abrir o link, ou colar o link ou o código na tela inicial, entra como membro. O link vale por 7 dias, serve para várias pessoas e pode ser revogado a qualquer momento.
+- **`ALLOWED_GITHUB_LOGINS`** (opcional): se preenchida, só esses logins criam workspaces; os demais entram apenas por convite. Vazia, qualquer conta cria. Numa instância pública, preencha: cada workspace gasta da sua chave de LLM, até `MAX_DAILY_COST_USD` por dia.
 - **Instalações**: **Conectar ao GitHub** (só o dono) vincula ao workspace ativo as instalações do App que a sua conta do GitHub enxerga e abre a página de instalação. A mesma instalação pode servir vários workspaces.
 
 Membros veem as respostas sobre todos os repos ligados ao workspace, mesmo os que não acessam diretamente no GitHub. Convide com isso em mente.

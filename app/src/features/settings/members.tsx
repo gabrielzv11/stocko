@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
+import { CopyButton } from '@/components/ui/copyButton';
 import { IconButton } from '@/components/ui/iconButton';
-import { TextField } from '@/components/ui/textField';
 import { api } from '@/lib/api';
 import { useMe, type Role } from '@/lib/me';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -8,10 +8,10 @@ import { isAxiosError } from 'axios';
 
 type Members = {
 	members: { userId: string; name: string | null; avatarUrl: string | null; login: string | null; role: Role }[];
-	invites: { id: string; login: string; createdAt: string }[];
+	invites: { id: string; code: string; expiresAt: string }[];
 };
 
-/** Membros do workspace ativo; o dono convida por login do GitHub (entra no próximo login da pessoa). */
+/** Membros do workspace ativo; o dono gera links de convite (valem 7 dias para quantas pessoas tiverem o link). */
 export function MembersSection() {
 	const queryClient = useQueryClient();
 	const { data: me } = useMe();
@@ -19,16 +19,9 @@ export function MembersSection() {
 	const invalidate = () => queryClient.invalidateQueries({ queryKey: ['members'] });
 	const owner = me?.role === 'owner';
 
-	const invite = useMutation({ mutationFn: (login: string) => api.post('/invites', { login }), onSuccess: invalidate });
+	const invite = useMutation({ mutationFn: () => api.post('/invites'), onSuccess: invalidate });
 	const cancel = useMutation({ mutationFn: (id: string) => api.delete(`/invites/${id}`), onSuccess: invalidate });
 	const remove = useMutation({ mutationFn: (userId: string) => api.delete(`/members/${userId}`), onSuccess: invalidate });
-
-	function handleSubmit(e: React.SubmitEvent<HTMLFormElement>) {
-		e.preventDefault();
-		const form = e.currentTarget;
-		const login = String(new FormData(form).get('login')).trim().replace(/^@/, '');
-		if (login) invite.mutate(login, { onSuccess: () => form.reset() });
-	}
 
 	const error = [invite.error, cancel.error, remove.error].find(isAxiosError)?.response?.data?.message;
 
@@ -36,7 +29,7 @@ export function MembersSection() {
 		<section className='flex flex-col gap-3'>
 			<h2 className='text-base font-semibold'>Membros</h2>
 			<p className='text-muted-foreground text-sm'>
-				Todos veem os mesmos projetos, conversas e configurações. A pessoa convidada entra no workspace no próximo login com o GitHub.
+				Todos veem os mesmos projetos, conversas e configurações. Quem abrir um link de convite ativo entra como membro.
 			</p>
 
 			{data?.members.map((m) => (
@@ -67,33 +60,36 @@ export function MembersSection() {
 				</div>
 			))}
 
-			{data?.invites.map((i) => (
-				<div key={i.id} className='flex items-center gap-3'>
-					<span className='border-border size-8 rounded-full border border-dashed' />
-					<div className='min-w-0 flex-1'>
-						<p className='truncate text-sm'>@{i.login}</p>
-						<p className='text-muted-foreground text-xs'>Convite pendente</p>
-					</div>
-					{owner && (
+			{data?.invites.map((i) => {
+				const link = `${window.location.origin}/invite/${i.code}`;
+				return (
+					<div key={i.id} className='flex items-center gap-3'>
+						<span className='border-border size-8 rounded-full border border-dashed' />
+						<div className='min-w-0 flex-1'>
+							<p className='truncate font-mono text-sm'>{link}</p>
+							<p className='text-muted-foreground text-xs'>
+								Código {i.code} · válido até {new Date(i.expiresAt).toLocaleDateString('pt-BR')}
+							</p>
+						</div>
+						<CopyButton text={link} label='Copiar link' />
 						<IconButton
 							icon='x'
 							variant='ghost'
 							size='sm'
-							aria-label={`Cancelar convite de ${i.login}`}
+							aria-label='Revogar convite'
 							disabled={cancel.isPending}
 							onClick={() => cancel.mutate(i.id)}
 						/>
-					)}
-				</div>
-			))}
+					</div>
+				);
+			})}
 
 			{owner && (
-				<form onSubmit={handleSubmit} className='flex gap-2'>
-					<TextField name='login' size='sm' placeholder='Login do GitHub' autoComplete='off' required />
-					<Button type='submit' size='sm' loading={invite.isPending} className='w-auto px-6'>
-						Convidar
+				<div>
+					<Button size='sm' variant='secondary' loading={invite.isPending} onClick={() => invite.mutate()} className='w-auto px-6'>
+						Gerar link de convite
 					</Button>
-				</form>
+				</div>
 			)}
 			{error && <p className='text-sm text-red-500'>{error}</p>}
 		</section>
