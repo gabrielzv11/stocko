@@ -100,6 +100,17 @@ export async function checkAccess(repositoryId: string, { fresh = false } = {}) 
 	return false;
 }
 
+/**
+ * Commits that left the observed branches (force-push removing a leaked secret, branch no longer observed) leave the
+ * disk now instead of in 2 weeks, so no tool reads them by sha. A tool mid-turn on the old sha gets "not found".
+ */
+export async function pruneUnobserved(dir: string, branchNames: string[]) {
+	const observed = new Set(branchNames.map((b) => `refs/heads/${b}`));
+	const refs = (await git(dir, ['for-each-ref', '--format=%(refname)', 'refs/heads'])).split('\n').filter(Boolean);
+	for (const ref of refs) if (!observed.has(ref)) await git(dir, ['update-ref', '-d', ref]);
+	await git(dir, ['gc', '--prune=now', '--quiet']);
+}
+
 /** Resolves when the running sync (if any) ends. Tools only need it before the first one. */
 export const waitForSync = (repositoryId: string) => inflight.get(repositoryId) ?? Promise.resolve();
 
@@ -148,7 +159,6 @@ async function doSync(repositoryId: string) {
 	for (const b of branches) {
 		const ref = `refs/heads/${b.name}`;
 		try {
-			// Fetch only adds objects: an older SHA a tool is reading stays readable (until gc prunes it, 2 weeks).
 			await git(dir, ['fetch', '--depth=1', '--quiet', url, `+${ref}:${ref}`], token);
 			const sha = (await git(dir, ['rev-parse', ref])).trim();
 			await mark([b.id], { status: 'ready', lastSyncedSha: sha });
@@ -163,6 +173,10 @@ async function doSync(repositoryId: string) {
 	const top = ready[0];
 	if (!top) return;
 	await git(dir, ['symbolic-ref', 'HEAD', `refs/heads/${top}`]);
+	await pruneUnobserved(
+		dir,
+		branches.map((b) => b.name)
+	).catch((e) => console.error(`[sync] ${repo.fullName} gc:`, e));
 	if (env.GREP_BACKEND === 'zoekt') {
 		// Incremental: no-op when the branch didn't move. -disable_ctags: no ctags binary in the image.
 		// Spawn throws when the binary is missing (local Windows dev); same outcome as a failed index.
