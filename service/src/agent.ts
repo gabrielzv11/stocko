@@ -1,10 +1,12 @@
 import { tool } from 'ai';
+import { existsSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
+import path from 'node:path';
 import { z } from 'zod';
 import { db } from './db';
 import { installationOctokit } from './client';
 import { env } from './env';
-import { git, repoDir, run, waitForSync, zoektDir } from './repos';
+import { git, repoDir, run, syncRepo, waitForSync, zoektDir } from './repos';
 
 const TRUNCATED = '\n[truncado — refine o padrão]';
 const MAX_GLOB = 500;
@@ -104,6 +106,9 @@ export function agentTools(repos: Repo[]) {
 		const repo = find(fullName);
 		const root = repoDir(repo.id);
 		if (!pinned.has(repo.id)) {
+			// Clone gone from disk while the DB still says synced (deploy without a volume, folder moved, another machine on
+			// the same DB): every git call would fail with ENOENT, and nothing else re-syncs a 'ready' branch. Fetch it again first.
+			if (!existsSync(path.join(root, 'HEAD'))) await syncRepo(repo.id);
 			// Any status: during a re-sync (or after a failed one) the last synced SHA is still in the bare repo.
 			const synced = () =>
 				db.repoBranch.findMany({ where: { repositoryId: repo.id, lastSyncedSha: { not: null } }, orderBy: { priority: 'asc' } });
