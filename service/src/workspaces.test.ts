@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect, mock, test } from 'bun:test';
 
 process.env.GITHUB_CLIENT_ID ||= 'test';
 process.env.GITHUB_CLIENT_SECRET ||= 'test';
@@ -6,6 +6,11 @@ process.env.GITHUB_APP_ID ||= 'test';
 process.env.GITHUB_APP_SLUG ||= 'test';
 process.env.GITHUB_APP_PRIVATE_KEY ||= '-----BEGIN PRIVATE KEY-----test';
 process.env.OPENROUTER_API_KEY ||= 'test';
+
+// The App sees 3 repos in every installation; the user sees all 3 too (fetch mock below), so linking goes through.
+mock.module('./client', () => ({
+	installationOctokit: () => ({ rest: { apps: { listReposAccessibleToInstallation: async () => ({ data: { total_count: 3 } }) } } }),
+}));
 
 const { auth } = await import('./auth');
 const { db } = await import('./db');
@@ -22,6 +27,7 @@ async function signIn(login: string, githubId: number, opts: { kind?: string; wo
 	globalThis.fetch = (async (url: string) => {
 		if (url.includes('/login/oauth/access_token')) return Response.json({ access_token: 'gho_test' });
 		if (url.endsWith('/user')) return Response.json({ id: githubId, login, name: null, avatar_url: '' });
+		if (url.includes('/repositories')) return Response.json({ total_count: 3 });
 		return Response.json({ installations: (opts.installations ?? []).map((id) => ({ id, account: { login: 'acme' } })) });
 	}) as typeof fetch;
 	try {
