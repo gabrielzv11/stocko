@@ -84,7 +84,7 @@ export const mcp = new Hono();
 mcp.all('/mcp', async (c) => {
 	const key = await authenticate(c.req.header('Authorization'));
 	if (!key) return c.json({ error: 'UNAUTHORIZED' satisfies ErrorCode, message: 'Chave de API ausente, inválida ou revogada.' }, 401);
-	const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true });
+	const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true, maxRequestBodySize: 1024 * 1024 });
 	await server(key).connect(transport);
 	return transport.handleRequest(c.req.raw);
 });

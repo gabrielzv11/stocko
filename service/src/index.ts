@@ -29,7 +29,10 @@ const tooLarge = (c: Context) => c.json({ error: 'payload_too_large' }, 413);
 const small = bodyLimit({ maxSize: 1024 * 1024, onError: tooLarge });
 // Corpos grandes: spec OpenAPI (até 10 MB de texto, folga para os escapes do JSON), docs do projeto (2 MB) e webhook de push com muitos commits.
 const large = bodyLimit({ maxSize: 16 * 1024 * 1024, onError: tooLarge });
-app.use((c, next) => (c.req.method === 'POST' && /\/(apis|docs)$|^\/webhooks\//.test(c.req.path) ? large : small)(c, next));
+// /mcp limita no próprio transport: no Bun 1.2.22, tocar req.body aqui e ler o stream depois de um await (authenticate) perde o corpo.
+app.use((c, next) =>
+	c.req.path === '/mcp' ? next() : (c.req.method === 'POST' && /\/(apis|docs)$|^\/webhooks\//.test(c.req.path) ? large : small)(c, next)
+);
 
 app.get('/health', async (c) => {
 	await db.$queryRaw`SELECT 1`;
