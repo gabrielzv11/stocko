@@ -6,7 +6,9 @@ import { auth } from './auth';
 import { chat } from './chat';
 import { db } from './db';
 import { env } from './env';
+import { keys } from './keys';
 import { knowledge } from './knowledge';
+import { mcp } from './mcp';
 import { projects } from './projects';
 import { removeSharedZoekt, resetStuckSyncs } from './repos';
 import { settings } from './settings';
@@ -42,5 +44,7 @@ app.route('/', usage);
 app.route('/', settings);
 app.route('/', webhooks);
 app.route('/', workspaces);
+app.route('/', keys);
+app.route('/', mcp);
 
 export default { port: env.PORT, fetch: app.fetch };

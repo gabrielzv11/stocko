@@ -126,7 +126,7 @@ async function doSync(repositoryId: string) {
 	// Fresh: about to talk to GitHub anyway; access lost → clone deleted, nothing to fetch.
 	if (!(await checkAccess(repositoryId, { fresh: true }))) return;
 	// updateMany: a branch removed mid-sync just matches nothing.
-	const mark = (ids: string[], data: { status: 'syncing' | 'ready' | 'error'; error?: string | null; lastSyncedSha?: string }) =>
+	const mark = (ids: string[], data: { status: 'syncing' | 'ready' | 'error'; error?: string | null; lastSyncedSha?: string; lastSyncedAt?: Date }) =>
 		db.repoBranch.updateMany({ where: { id: { in: ids } }, data });
 	await mark(
 		branches.map((b) => b.id),
@@ -161,7 +161,7 @@ async function doSync(repositoryId: string) {
 		try {
 			await git(dir, ['fetch', '--depth=1', '--quiet', url, `+${ref}:${ref}`], token);
 			const sha = (await git(dir, ['rev-parse', ref])).trim();
-			await mark([b.id], { status: 'ready', lastSyncedSha: sha });
+			await mark([b.id], { status: 'ready', lastSyncedSha: sha, lastSyncedAt: new Date() });
 			ready.push(b.name);
 		} catch (e) {
 			await mark([b.id], { status: 'error', error: (e as Error).message.slice(0, 500) });

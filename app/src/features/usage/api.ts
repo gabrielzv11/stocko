@@ -9,6 +9,7 @@ export type Usage = {
 	totals: Sum;
 	byDay: ({ day: string } & Sum)[];
 	byModel: ({ model: string } & Sum)[];
+	bySource: ({ source: 'chat' | 'mcp' } & Sum)[];
 	byProject: ({ id: string; name: string } & Sum)[];
 	byConversation: ({ id: string; title: string } & Sum)[];
 };

@@ -150,7 +150,12 @@ export default function UsagePage() {
 
 			<DailyCost data={data} />
 
-			<div className='grid gap-4 lg:grid-cols-3'>
+			<div className='grid gap-4 md:grid-cols-2'>
+				<Breakdown
+					title='Por origem'
+					empty='Nenhum uso ainda.'
+					rows={data.bySource.map((s) => ({ ...s, key: s.source, label: s.source === 'mcp' ? 'MCP (ask)' : 'Chat' }))}
+				/>
 				<Breakdown title='Por modelo' empty='Nenhum uso ainda.' rows={data.byModel.map((m) => ({ ...m, key: m.model, label: m.model }))} />
 				<Breakdown
 					title='Por projeto'

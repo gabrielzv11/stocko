@@ -21,7 +21,7 @@ const sorted = (map: Map<string, Sum>) => [...map].map(([key, s]) => ({ key, ...
 
 export const usage = new Hono<{ Variables: AuthVars }>();
 
-/** LLM spend (cost only from OpenRouter) of the workspace's agent turns in the last DAYS days. `tz` (IANA) buckets the days. */
+/** LLM spend (cost only from OpenRouter) of the workspace's agent turns and MCP `ask` calls in the last DAYS days. `tz` (IANA) buckets the days. */
 usage.get('/usage', requireAuth, async (c) => {
 	let timeZone = c.req.query('tz') || 'UTC';
 	try {
@@ -46,17 +46,29 @@ usage.get('/usage', requireAuth, async (c) => {
 		},
 	});
 
+	// MCP calls with LLM usage (ask). Not conversations: they only enter totals, day, model, project and source.
+	const calls = await db.mcpCall.findMany({
+		where: { workspaceId: c.var.workspaceId, createdAt: { gte: since }, model: { not: null } },
+		select: { createdAt: true, model: true, cost: true, inputTokens: true, outputTokens: true, cachedTokens: true, projectId: true },
+	});
+	const callProjects = await db.project.findMany({
+		where: { workspaceId: c.var.workspaceId, id: { in: calls.flatMap((m) => (m.projectId ? [m.projectId] : [])) } },
+		select: { id: true, name: true },
+	});
+
 	const total = new Map<string, Sum>();
 	const byDay = new Map<string, Sum>();
 	const byModel = new Map<string, Sum>();
 	const byProject = new Map<string, Sum>();
 	const byConversation = new Map<string, Sum>();
-	const names = new Map<string, string>();
+	const bySource = new Map<string, Sum>();
+	const names = new Map<string, string>(callProjects.map((p) => [p.id, p.name]));
 
 	for (const m of messages) {
 		add(total, 'total', m);
 		add(byDay, day.format(m.createdAt), m);
 		add(byModel, m.model ?? 'desconhecido', m);
+		add(bySource, 'chat', m);
 		add(byConversation, m.conversation.id, m);
 		names.set(m.conversation.id, m.conversation.title ?? 'Sem título');
 		// Conversa ligada a N projetos conta em cada um.
@@ -65,6 +77,14 @@ usage.get('/usage', requireAuth, async (c) => {
 			names.set(p.id, p.name);
 		}
 	}
+	for (const m of calls) {
+		add(total, 'total', m);
+		add(byDay, day.format(m.createdAt), m);
+		add(byModel, m.model ?? 'desconhecido', m);
+		add(bySource, 'mcp', m);
+		// Project deleted since: the call still counts everywhere else.
+		if (m.projectId && names.has(m.projectId)) add(byProject, m.projectId, m);
+	}
 
 	return c.json({
 		since: since.toISOString(),
@@ -72,6 +92,7 @@ usage.get('/usage', requireAuth, async (c) => {
 		totals: total.get('total') ?? empty(),
 		byDay: [...byDay].map(([day, s]) => ({ day, ...s })).sort((a, b) => a.day.localeCompare(b.day)),
 		byModel: sorted(byModel).map(({ key, ...s }) => ({ model: key, ...s })),
+		bySource: sorted(bySource).map(({ key, ...s }) => ({ source: key, ...s })),
 		byProject: sorted(byProject).map(({ key, ...s }) => ({ id: key, name: names.get(key)!, ...s })),
 		byConversation: sorted(byConversation)
 			.slice(0, 10)

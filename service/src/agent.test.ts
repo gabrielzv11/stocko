@@ -69,7 +69,7 @@ test('tools read the bare repo by SHA and never leave its tree', async () => {
 	expect(await call('grep', { repo: 'acme/app', regex: 'const \\w+ = 1' })).toBe('src/a.ts:1:export const a = 1;');
 	expect(await call('grep', { repo: 'acme/app', regex: 'app', glob: '*.ts' })).toStartWith('nenhum resultado em main');
 
-	expect(await call('read_file', { repo: 'acme/app', path: './src/a.ts', start: 2 })).toBe(`acme/app/./src/a.ts@${sha.slice(0, 7)} · branch main\n2\texport const b = "x y";\n3\t`);
+	expect(await call('read_file', { repo: 'acme/app', path: './src/a.ts', start: 2 })).toBe(`acme/app/./src/a.ts@${sha.slice(0, 7)} · branch main\n2\texport const b = "x y";`);
 	// Cascade: not in main → hint with the next branches; there with ref, or by sha.
 	expect(await call('read_file', { repo: 'acme/app', path: 'src/next.ts' })).toContain('outras branches, em ordem: develop (use ref)');
 	expect(await call('read_file', { repo: 'acme/app', path: 'src/next.ts', ref: 'develop' })).toContain('export const next = 2;');

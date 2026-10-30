@@ -22,6 +22,7 @@ Open-source e self-hosted: você roda a instância, cria o próprio GitHub App e
   - [3. Modelo de LLM por workspace](#3-modelo-de-llm-por-workspace)
   - [4. Fontes do projeto: docs, Jira e APIs](#4-fontes-do-projeto-docs-jira-e-apis)
 - [Acesso e workspaces](#acesso-e-workspaces)
+- [Servidor MCP](#servidor-mcp)
 - [Segurança e privacidade](#segurança-e-privacidade)
 - [Desenvolvimento](#desenvolvimento)
 - [Limitações conhecidas](#limitações-conhecidas)
@@ -84,6 +85,9 @@ service/
     summary.ts            título e resumo incremental das conversas
     settings.ts           provedor e modelo de LLM do workspace
     usage.ts              custo e tokens dos últimos 30 dias
+    query.ts              consultas de domínio (list_projects, search_code, read_file, ask), sem MCP
+    keys.ts               chaves de API, rate limit e log de chamadas
+    mcp.ts                servidor MCP em /mcp (Streamable HTTP) sobre query.ts
     *.test.ts             testes (bun test)
   scripts/
     setup-github.ts       cria o GitHub App a partir de um manifest e grava o .env
@@ -215,6 +219,129 @@ O código diz o que **é**; docs e tickets dizem o que **deveria ser**. Em pergu
 
 Membros veem as respostas sobre todos os repos ligados ao workspace, mesmo os que não acessam diretamente no GitHub. Convide com isso em mente.
 
+## Servidor MCP
+
+A API expõe os projetos do workspace como servidor [MCP](https://modelcontextprotocol.io) remoto, para agentes externos (Claude Code, Cursor, jobs de CI) buscarem, lerem e perguntarem sobre o código indexado. O endpoint é `<api>/mcp`, em Streamable HTTP sem sessão, com respostas JSON ([service/src/mcp.ts](service/src/mcp.ts)). As consultas ficam em funções de domínio sem dependência de MCP ([service/src/query.ts](service/src/query.ts)), e o adaptador só faz a ponte.
+
+### Chave de API
+
+Em **Configurações → Chaves de API (MCP)**, dê um nome e clique em **Gerar chave**. A chave (`stk_...`) aparece uma vez; o banco guarda só o `sha256`. Ela age como você, **só no workspace que estava ativo** quando foi criada, e para de valer se você sair dele ou revogá-la na mesma tela.
+
+Envie em `Authorization: Bearer <chave>`. Sem chave válida, `/mcp` responde `401` com `{"error": "UNAUTHORIZED"}`.
+
+### Conectar um cliente
+
+**Claude Code:**
+
+```sh
+claude mcp add --transport http stocko https://api.exemplo.com/mcp --header "Authorization: Bearer $STOCKO_API_KEY"
+```
+
+**Cursor** (`.cursor/mcp.json` ou `~/.cursor/mcp.json`):
+
+```json
+{
+	"mcpServers": {
+		"stocko": {
+			"url": "https://api.exemplo.com/mcp",
+			"headers": { "Authorization": "Bearer ${env:STOCKO_API_KEY}" }
+		}
+	}
+}
+```
+
+### Tools
+
+Todas leem **um repositório** na branch de maior prioridade sincronizada (a que o Zoekt indexa) e devolvem `repo`, `branch`, `indexedSha` (commit lido) e `indexedAt` (quando foi sincronizado). `project` é o id de `list_projects`; `repo` (`owner/name`) é obrigatório quando o projeto tem mais de um repositório.
+
+| Tool            | Entrada                                              | Saída (além de `repo`, `branch`, `indexedSha`, `indexedAt`)                  |
+| --------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `list_projects` | —                                                    | `projects: [{ id, name, repos: [{ repo, branch, indexedSha, indexedAt }] }]` |
+| `search_code`   | `project`, `repo?`, `query`, `limit?` (20, máx. 100) | `results: [{ path, line, snippet }]`, `truncated`                            |
+| `read_file`     | `project`, `repo?`, `path`, `startLine?`, `endLine?` | `path`, `startLine`, `endLine`, `totalLines`, `content`, `truncated`         |
+| `ask`           | `project`, `repo?`, `question`                       | `answer`, `citations: [{ path, startLine, endLine }]`                        |
+
+- **`search_code`** usa a [sintaxe de query do Zoekt](https://github.com/sourcegraph/zoekt/blob/main/doc/query_syntax.md) (`f:`, `lang:`, `case:yes`, regex, `-f:test`...). Precisa de `GREP_BACKEND=zoekt`; sem índice, responde `INDEX_UNAVAILABLE`.
+- **`read_file`** devolve até 400 linhas por chamada. `truncated: true` quer dizer que veio menos do que o pedido; continue com `startLine = endLine + 1`. Só lê arquivos do commit indexado: `../`, caminhos absolutos e symlinks não alcançam o disco do servidor.
+- **`ask`** roda o agente só com as ferramentas de código (`glob`, `grep`, `read_file`), sem docs, Jira nem APIs, em até 15 passos. Toda afirmação vem citada; sem evidência, a resposta diz que não encontrou. É a única tool com custo de LLM: usa o modelo do workspace e entra no teto `MAX_DAILY_COST_USD` e na página **Uso** (origem "MCP").
+
+Exemplo de `search_code`:
+
+```json
+{ "project": "cmh1x9k2p0001", "repo": "acme/loja", "query": "f:\\.ts$ calcTotal", "limit": 2 }
+```
+
+```json
+{
+	"repo": "acme/loja",
+	"branch": "main",
+	"indexedSha": "3f9c2ab4e1d07c5b9a8f6e2d1c0b9a8f7e6d5c4b",
+	"indexedAt": "2026-10-28T14:02:11.000Z",
+	"results": [
+		{ "path": "src/cart/total.ts", "line": 10, "snippet": "export function calcTotal(items: Item[]) {" },
+		{ "path": "src/cart/total.test.ts", "line": 3, "snippet": "import { calcTotal } from './total';" }
+	],
+	"truncated": true
+}
+```
+
+Exemplo de `read_file`:
+
+```json
+{ "project": "cmh1x9k2p0001", "repo": "acme/loja", "path": "src/cart/total.ts", "startLine": 10, "endLine": 12 }
+```
+
+```json
+{
+	"repo": "acme/loja",
+	"branch": "main",
+	"indexedSha": "3f9c2ab4e1d07c5b9a8f6e2d1c0b9a8f7e6d5c4b",
+	"indexedAt": "2026-10-28T14:02:11.000Z",
+	"path": "src/cart/total.ts",
+	"startLine": 10,
+	"endLine": 12,
+	"totalLines": 41,
+	"content": "export function calcTotal(items: Item[]) {\n\tconst subtotal = items.reduce((s, i) => s + i.price * i.qty, 0);\n\treturn applyDiscount(subtotal);",
+	"truncated": false
+}
+```
+
+Exemplo de `ask`:
+
+```json
+{ "project": "cmh1x9k2p0001", "repo": "acme/loja", "question": "Onde o desconto é aplicado no total do carrinho?" }
+```
+
+```json
+{
+	"repo": "acme/loja",
+	"branch": "main",
+	"indexedSha": "3f9c2ab4e1d07c5b9a8f6e2d1c0b9a8f7e6d5c4b",
+	"indexedAt": "2026-10-28T14:02:11.000Z",
+	"answer": "`calcTotal` soma preço × quantidade e passa o subtotal para `applyDiscount` (`acme/loja/src/cart/total.ts#L10-L12@3f9c2ab`), que aplica o maior cupom válido (`acme/loja/src/cart/discount.ts#L5-L18@3f9c2ab`).",
+	"citations": [
+		{ "path": "src/cart/total.ts", "startLine": 10, "endLine": 12 },
+		{ "path": "src/cart/discount.ts", "startLine": 5, "endLine": 18 }
+	]
+}
+```
+
+### Erros e limites
+
+Erro de tool volta com `isError: true` e o texto `{"error": "<código>", "message": "..."}`:
+
+| Código              | Quando                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`      | Chave ausente, inválida, revogada ou de quem saiu do workspace (HTTP 401)                   |
+| `PROJECT_NOT_FOUND` | Projeto inexistente ou de outro workspace (indistinguíveis, de propósito)                   |
+| `FILE_NOT_FOUND`    | Caminho que não é arquivo no commit indexado                                                |
+| `RATE_LIMITED`      | Acima de 60 chamadas/min por chave, 5 `ask`/min por chave, ou teto diário de gasto atingido |
+| `INDEX_UNAVAILABLE` | Repo ainda não sincronizado, sem acesso no GitHub, ou sem índice Zoekt                      |
+| `INVALID_INPUT`     | `repo` ausente ou fora do projeto, intervalo de linhas inválido, query recusada pelo Zoekt  |
+| `INTERNAL`          | Falha inesperada (detalhe só no log do servidor)                                            |
+
+Cada chamada grava uma linha em `McpCall`: chave, tool, projeto, duração, sucesso ou código de erro, e tokens e custo no `ask`. Nunca a entrada nem a resposta.
+
 ## Segurança e privacidade
 
 - **O código vai para o provedor de LLM.** Trechos lidos pelo agente (arquivos, diffs, resultados de busca, respostas de API, docs e tickets) são enviados ao OpenRouter e ao modelo escolhido, ou ao Mangaba Router. Confira a política de dados do provedor e se o contrato ou NDA dos repositórios de clientes permite isso. Evite modelos `:free`, que podem registrar ou treinar com o conteúdo.
@@ -259,7 +386,7 @@ Os testes gravam no banco do `DATABASE_URL`, então use um banco local.
 
 **Respostas e custo**
 
-- **Teto diário aproximado.** O custo só é somado no fim do turno; perguntas simultâneas podem passar um pouco de `MAX_DAILY_COST_USD`. Título e resumo da conversa não entram no teto nem no painel de uso.
+- **Teto diário aproximado.** O custo só é somado no fim do turno; perguntas simultâneas podem passar um pouco de `MAX_DAILY_COST_USD`. Título e resumo da conversa não entram no teto nem no painel de uso. O `ask` do MCP entra nos dois. Os limites por minuto das chaves também são contados no banco, e uma rajada paralela pode passar um pouco deles.
 - **Custo só do OpenRouter.** Com Mangaba, tokens são registrados mas o custo não, e o teto diário não se aplica.
 - **Busca de docs por palavra-chave.** Full-text em português, sem embeddings: paráfrases sem palavras em comum podem não ser encontradas. Sem índice, fica lenta acima de algumas dezenas de milhares de trechos.
 - **Jira Cloud apenas** (API v3 com e-mail e token), até 2000 tickets por fonte.

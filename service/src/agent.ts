@@ -49,17 +49,37 @@ export function globToRegex(glob: string) {
 export const zoektAtom = (re: string) =>
 	re.replace(/\\.|[\s"]/g, (m) => (/^\\?[\s"]$/.test(m) ? `\\x{${m.at(-1)!.charCodeAt(0).toString(16)}}` : m));
 
-/** `path:line:text` from the repo's Zoekt shards, or null when the repo has no shard yet (caller falls back to git). */
-async function zoektGrep(repoId: string, regex: string, glob?: string) {
+/** `path:line:text` for a Zoekt query on the repo's shards, or null when the repo has no shard yet. */
+export async function zoektSearch(repoId: string, query: string) {
 	// Index dir holds only this repo: whatever the query says, it can't search another workspace's code.
 	const dir = zoektDir(repoId);
 	const shards = await readdir(dir).catch(() => []);
 	if (!shards.some((f) => f.endsWith('.zoekt'))) return null;
-	const q = ['case:yes', glob && `f:${zoektAtom(globToRegex(glob))}`, `regex:${zoektAtom(regex)}`].filter(Boolean).join(' ');
 	// -v: without it the CLI discards its own error messages (bad regex comes back as a bare exit 1).
-	const { out, err, code } = await run(['zoekt', '-v', '-index_dir', dir, q], { timeoutMs: GREP_TIMEOUT_MS });
+	// --: a query starting with "-" (e.g. "-index_dir=<other repo>") would otherwise be parsed as a flag.
+	const { out, err, code } = await run(['zoekt', '-v', '-index_dir', dir, '--', query], { timeoutMs: GREP_TIMEOUT_MS });
 	if (code !== 0) throw new Error(err.trim().split('\n').at(-1) || 'zoekt falhou');
 	return out;
+}
+
+/** Agent's grep on Zoekt: null when the repo has no shard yet (caller falls back to git). */
+const zoektGrep = (repoId: string, regex: string, glob?: string) =>
+	zoektSearch(repoId, ['case:yes', glob && `f:${zoektAtom(globToRegex(glob))}`, `regex:${zoektAtom(regex)}`].filter(Boolean).join(' '));
+
+/**
+ * Lines of `p` in the SHA's tree. Object lookup, so "../", absolute paths and symlinks can't reach the host filesystem.
+ * A trailing newline doesn't count as an extra line.
+ */
+export async function readBlob(root: string, sha: string, p: string): Promise<{ lines: string[] } | { error: 'tree' | 'missing' | 'too_large' }> {
+	const rel = p.replaceAll('\\', '/').replace(/^\.?\/+/, '');
+	// "<mode> <type> <object> <size>\t<path>\0" (-z: path unquoted); empty when the path isn't in the tree.
+	const entry = await git(root, ['--literal-pathspecs', 'ls-tree', '-l', '-z', sha, '--', rel]).catch(() => '');
+	const [, type, object, size] = entry.split(/\s+/);
+	if (type === 'tree') return { error: 'tree' };
+	if (type !== 'blob' || !object || !entry.endsWith(`\t${rel}\0`)) return { error: 'missing' };
+	if (Number(size) > MAX_READ_BYTES) return { error: 'too_large' };
+	const text = await git(root, ['cat-file', 'blob', object]);
+	return { lines: (text.endsWith('\n') ? text.slice(0, -1) : text).split('\n') };
 }
 
 /** `path:line:text` via git grep on the SHA's tree. */
@@ -214,16 +234,13 @@ export function agentTools(repos: Repo[]) {
 			}),
 			execute: safe(async ({ repo, path: p, start = 1, end, ref }) => {
 				const { root, sha, branch, missing } = await open(repo, ref);
-				// Object lookup in the SHA's tree: "../", absolute paths and symlinks can't reach the host filesystem.
-				const rel = p.replaceAll('\\', '/').replace(/^\.?\/+/, '');
-				// "<mode> <type> <object> <size>\t<path>\0" (-z: path unquoted); empty when the path isn't in the tree.
-				const entry = await git(root, ['--literal-pathspecs', 'ls-tree', '-l', '-z', sha, '--', rel]).catch(() => '');
-				const [, type, object, size] = entry.split(/\s+/);
-				if (type === 'tree') throw new Error(`${p} é um diretório; use glob`);
-				if (type !== 'blob' || !entry.endsWith(`\t${rel}\0`)) throw new Error(missing(`arquivo não encontrado: ${p}`));
-				if (Number(size) > MAX_READ_BYTES) throw new Error('arquivo grande demais; use grep');
-
-				const lines = (await git(root, ['cat-file', 'blob', object!])).split('\n');
+				const blob = await readBlob(root, sha, p);
+				if ('error' in blob) {
+					if (blob.error === 'tree') throw new Error(`${p} é um diretório; use glob`);
+					if (blob.error === 'too_large') throw new Error('arquivo grande demais; use grep');
+					throw new Error(missing(`arquivo não encontrado: ${p}`));
+				}
+				const { lines } = blob;
 				const last = Math.min(end ?? lines.length, start + MAX_READ_LINES - 1, lines.length);
 				const body = lines
 					.slice(start - 1, last)

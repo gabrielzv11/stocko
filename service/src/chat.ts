@@ -25,21 +25,24 @@ const MAX_TITLE = 80;
 const MAX_MESSAGES_PER_MINUTE = 10;
 const MAX_QUESTION = 20_000;
 
-/** Why the workspace can't ask right now, or null. Counts what's already in the DB: no in-memory state, survives restarts. */
-async function limitError(workspaceId: string) {
-	const inWorkspace = { conversation: { workspaceId } };
-	const [recent, spent] = await Promise.all([
-		db.message.count({ where: { ...inWorkspace, role: 'user', createdAt: { gte: new Date(Date.now() - 60_000) } } }),
-		db.message.aggregate({
-			_sum: { cost: true },
-			where: { ...inWorkspace, role: 'assistant', createdAt: { gte: new Date(Date.now() - 86_400_000) } },
-		}),
+/** Over the workspace's 24h LLM spend → why, else null. Chat answers and MCP `ask` calls share the cap. */
+export async function spendCapError(workspaceId: string) {
+	const since = new Date(Date.now() - 86_400_000);
+	const [chat, mcp] = await Promise.all([
+		db.message.aggregate({ _sum: { cost: true }, where: { conversation: { workspaceId }, role: 'assistant', createdAt: { gte: since } } }),
+		db.mcpCall.aggregate({ _sum: { cost: true }, where: { workspaceId, createdAt: { gte: since } } }),
 	]);
-	if (recent >= MAX_MESSAGES_PER_MINUTE) return 'Muitas perguntas seguidas; aguarde um minuto.';
 	// ponytail: o custo só entra no fim do turno; turnos simultâneos podem passar um pouco do teto.
-	if (Number(spent._sum.cost ?? 0) >= env.MAX_DAILY_COST_USD)
+	if (Number(chat._sum.cost ?? 0) + Number(mcp._sum.cost ?? 0) >= env.MAX_DAILY_COST_USD)
 		return `Limite de gasto de US$ ${env.MAX_DAILY_COST_USD} nas últimas 24h atingido; tente mais tarde.`;
 	return null;
+}
+
+/** Why the workspace can't ask right now, or null. Counts what's already in the DB: no in-memory state, survives restarts. */
+async function limitError(workspaceId: string) {
+	const recent = await db.message.count({ where: { conversation: { workspaceId }, role: 'user', createdAt: { gte: new Date(Date.now() - 60_000) } } });
+	if (recent >= MAX_MESSAGES_PER_MINUTE) return 'Muitas perguntas seguidas; aguarde um minuto.';
+	return spendCapError(workspaceId);
 }
 
 const body = z.object({
@@ -56,11 +59,12 @@ const body = z.object({
 });
 
 /** Tokens and OpenRouter cost of the whole turn (every agent step). Null fields if the stream died mid-way; null cost on other providers. */
-async function turnUsage(
+export async function turnUsage(
 	llm: { provider: string; model: string },
+	// Promises from streamText, plain values from generateText.
 	result: {
-		totalUsage: PromiseLike<LanguageModelUsage>;
-		steps: PromiseLike<{ providerMetadata?: ProviderMetadata }[]>;
+		totalUsage: LanguageModelUsage | PromiseLike<LanguageModelUsage>;
+		steps: { providerMetadata?: ProviderMetadata }[] | PromiseLike<{ providerMetadata?: ProviderMetadata }[]>;
 	}
 ) {
 	try {
